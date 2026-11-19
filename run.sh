@@ -4,6 +4,7 @@
 #   ./run.sh profile <akun> [jumlah_post] [max_komentar]
 #   ./run.sh keyword "<kata kunci>" [jumlah_post] [max_komentar]
 #   ./run.sh post <url_postingan> [max_komentar]
+#   ./run.sh build                                  # build tampilan React + Tailwind ke dist/
 #   ./run.sh serve [port]                           # viewer + halaman sentimen di localhost:8000
 #   ./run.sh migrate                                # migrasi data.json lama ke schema baru
 #   ./run.sh analyze [opsi]                         # analisis konten via LLM (.env -> llm_analysis.json)
@@ -24,7 +25,15 @@ case "$cmd" in
   profile) scrape profile "${1:?akun belum diisi}" --max-posts "${2:-10}" --max-replies "${3:-400}" ;;
   keyword) scrape keyword "${1:?kata kunci belum diisi}" --max-posts "${2:-15}" --max-replies "${3:-400}" ;;
   post)    scrape post "${1:?url belum diisi}" --max-replies "${2:-400}" ;;
-  serve)   port="${1:-8000}"; python llm_server.py --port "$port" ;;
+  build)   npm run build ;;
+  serve)
+    port="${1:-8000}"
+    if [ -f package.json ] && command -v npm >/dev/null 2>&1 && [ ! -f dist/index.html ]; then
+      echo "Build React pertama kali…"
+      npm run build
+    fi
+    python llm_server.py --port "$port"
+    ;;
   migrate) python migrate_data.py --src "$OUT" ;;
   analyze) python llm_analyze.py "$@" ;;
   test)

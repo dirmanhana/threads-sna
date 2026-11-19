@@ -58,6 +58,17 @@ Checklist dari saran yang disetujui. Selesai semua pada sesi ini.
 
 ## Perbaikan lanjutan
 - [x] Bug: akun yang hanya disebut (@mention) tidak punya node → `d3.forceLink` melempar `node not found`, yang salah dilaporkan sebagai "Gagal memuat data.json" / "JSON tidak valid"
+
+## Port tampilan ke React + Tailwind (Mosaic Lite)
+- [x] Scaffold Vite + React 19 + Tailwind CSS v4 (`package.json`, `vite.config.mjs`, `index.html`, `src/`); build ke `dist/`
+- [x] Layout dashboard: sidebar (collapse + mode gelap), header, kartu KPI, footer atribusi Mosaic Lite
+- [x] Port penuh `sentimen.html` → `SentimentPage.jsx`: label per komentar, filter, ringkasan, topik, kata kunci, ekspor CSV, tombol analisis + progres
+- [x] Port penuh `viewer.html` → `ViewerPage.jsx` + komponen `GraphCanvas`, `Timeline`, `InfoPanel`
+- [x] Fitur viewer tetap lengkap: filter edge/derajat/tanggal/akun/pencarian, fokus & isolasi, fullscreen, time-lapse + scrub, anomali/CIB/buzzer, timeline klik, ekspor CSV/GraphML/PNG/SVG/laporan
+- [x] `viewer_core.js` tetap dipakai (UMD sekaligus menetapkan `globalThis.SNA` untuk bundler ESM); 16 test Python + 23 test Node tetap lulus
+- [x] `llm_server.py` menyajikan `dist/` dan memetakan `/viewer.html` + `/sentimen.html` ke SPA; fallback ke HTML lama sebelum build; `.env` tetap diblokir
+- [x] `run.sh build`, auto-build saat `serve` pertama, `.gitignore` untuk `node_modules/` & `dist/`, `LICENSE` GPL-3.0 + atribusi Mosaic Lite
+- [x] Verifikasi browser (Playwright) kedua halaman dengan data nyata: 790 node/854 relasi, 819 komentar berlabel, tanpa page error; filter, fokus/isolasi, anomali, replay, ekspor, dark mode berfungsi
 - [x] Pisahkan error parse JSON vs error render di banner viewer; beri petunjuk `./run.sh serve` kalau `fetch` diblokir
 - [x] Tambah test regresi mention-only node (13 test Node)
 

@@ -10,6 +10,13 @@ chmod +x install.sh && ./install.sh
 
 Membuat `.venv`, meng-install Playwright dan Chromium. Jika Chromium gagal jalan di Linux karena library sistem: `WITH_DEPS=1 ./install.sh` (butuh sudo).
 
+Tampilan dashboard (React + Tailwind) memerlukan Node 20+:
+
+```bash
+npm install                 # sekali saja; mengundang React, D3, Vite, Tailwind
+./run.sh build              # build ke dist/ (otomatis saat serve pertama kali)
+```
+
 Untuk fitur analisis konten berbasis LLM, salin `.env.example` menjadi `.env` lalu isi kredensial. File `.env` **tidak pernah dikirim ke browser** dan sudah masuk `.gitignore`. Skrip analisis memakai `urllib` standar Python (tanpa dependency tambahan).
 
 ## Pemakaian
@@ -19,6 +26,7 @@ Untuk fitur analisis konten berbasis LLM, salin `.env.example` menjadi `.env` la
 ./run.sh keyword "umkm" 15 400              # cari kata kunci, 15 postingan, maks 400 komentar/post
 ./run.sh profile akun_target 10             # atau ambil dari satu profil
 ./run.sh post https://www.threads.com/@akun/post/XXXX
+./run.sh build                              # build tampilan React + Tailwind ke dist/
 ./run.sh serve                              # buka http://localhost:8000/viewer.html
                                             # analisis sentimen: http://localhost:8000/sentimen.html
 ./run.sh migrate                            # migrasi data.json lama ke schema baru
@@ -74,6 +82,18 @@ Data lama (sebelum schema ini) bisa dimigrasi dengan `./run.sh migrate`. Backup 
 - Viewer memuat `data.json` otomatis; tanpa file itu, data contoh tampil dengan banner peringatan. Bisa juga tombol **Muat data.json**.
 - Logika graf murni (build, metrik, Louvain) ada di `viewer_core.js`; bisa dipakai dari Node lewat `require('./viewer_core.js')`.
 
+## Tampilan dashboard (React + Tailwind)
+
+Kedua halaman sekarang adalah satu aplikasi React + Vite + Tailwind CSS v4 yang dibangun ke `dist/`:
+
+- `src/pages/ViewerPage.jsx` — peta jaringan + semua fitur viewer di atas (D3 force graph, filter, panel, time-lapse, anomali, timeline, ekspor).
+- `src/pages/SentimentPage.jsx` — halaman label sentimen per komentar.
+- `src/components/` — layout sidebar/header ala dashboard, kanvas graf, timeline, dan panel informasi.
+- `src/lib/` — helper murni, utilitas fetch/unduh, dan modul ekspor; `viewer_core.js` tetap dipakai apa adanya supaya test Node tidak berubah.
+- `src/App.jsx` memilih halaman dari `pathname`: `/sentimen.html` → sentimen, selain itu → viewer.
+
+`llm_server.py` menyajikan `dist/` bila sudah dibangun: `/viewer.html` dan `/sentimen.html` memuat `index.html` yang sama, aset dari `/assets/`, sementara `data.json` dan `llm_analysis.json` tetap dibaca dari root proyek. Sebelum `npm run build`, server fallback ke file HTML lama. `node_modules/` dan `dist/` tidak masuk git.
+
 ## Analisis konten (LLM)
 
 Graf menjawab **siapa bicara dengan siapa**; bagian ini menjawab **apa yang mereka bicarakan** dan **bagaimana nadanya**. Analisis tetap dijalankan sebagai proses lokal (bukan di browser), tetapi bisa dipicu langsung dari halaman sentimen lewat server lokal kecil di `llm_server.py`:
@@ -119,3 +139,4 @@ Buka `http://localhost:8000/sentimen.html` setelah menjalankan `./run.sh serve`.
 - Scroll berhenti otomatis setelah beberapa putaran tanpa item baru, atau setelah `--max-replies` tercapai. Jeda antar postingan bisa diatur supaya tidak memicu rate limit.
 - Scraping melanggar ketentuan layanan Meta; pakai akun cadangan dan jeda wajar.
 - Rincian pekerjaan ada di `ROADMAP.md`.
+- Lisensi proyek: **GPL-3.0** (`LICENSE`). Tampilan dashboard terinspirasi [Mosaic Lite](https://github.com/cruip/tailwind-dashboard-template) oleh Cruip (GPL-3.0, © 2020 Cruip); atribusi juga tercantum di footer aplikasi. Template tidak di-republish atau dijual kembali.

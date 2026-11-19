@@ -1,0 +1,23 @@
+{
+  "name": "threads-sna-dashboard",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Dashboard analisis jaringan dan sentimen Threads (React + Tailwind)",
+  "license": "GPL-3.0-or-later",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview --host 127.0.0.1"
+  },
+  "dependencies": {
+    "d3": "^7.9.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.0.0",
+    "@vitejs/plugin-react": "^4.2.1",
+    "tailwindcss": "^4.0.0",
+    "vite": "^6.0.3"
+  }
+}

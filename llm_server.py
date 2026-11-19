@@ -19,6 +19,7 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
+DIST = ROOT / "dist"
 PROGRESS = ROOT / "llm_progress.json"
 RESULT = ROOT / "llm_analysis.json"
 
@@ -98,6 +99,23 @@ def drain(proc: subprocess.Popen) -> None:
 
 class Handler(SimpleHTTPRequestHandler):
     server_version = "ThreadsSNA/1.0"
+
+    def translate_path(self, path):
+        """Sajikan build React dari dist/; data.json tetap dari ROOT.
+
+        /viewer.html dan /sentimen.html adalah dua "halaman" SPA yang sama,
+        dipilih oleh src/App.jsx berdasarkan pathname. Jika dist/ belum ada,
+        fallback ke file HTML lama agar server tetap berguna sebelum build.
+        """
+        clean = path.split("?", 1)[0].split("#", 1)[0]
+        has_dist = (DIST / "index.html").exists()
+        if clean == "/" and has_dist:
+            return str(DIST / "index.html")
+        if clean in ("/viewer.html", "/sentimen.html") and has_dist:
+            return str(DIST / "index.html")
+        if clean.startswith("/assets/") and has_dist:
+            return str(DIST / clean.lstrip("/"))
+        return super().translate_path(path)
 
     def list_directory(self, path):
         # Jangan tampilkan daftar isi (bisa memuat .env bila dibuka peramban).
@@ -193,6 +211,8 @@ def main() -> int:
     a = ap.parse_args()
     handler = lambda *args, **kw: Handler(*args, directory=str(ROOT), **kw)
     server = ThreadingHTTPServer((a.host, a.port), handler)
+    mode = "build React (dist/)" if (DIST / "index.html").exists() else "HTML lama (jalankan npm run build)"
+    print("Mode tampilan: %s" % mode, file=sys.stderr)
     print("Viewer:   http://%s:%d/viewer.html" % (a.host, a.port), file=sys.stderr)
     print("Sentimen: http://%s:%d/sentimen.html" % (a.host, a.port), file=sys.stderr)
     print("API analisis lokal: /api/analyze, /api/status (kunci tetap di .env)", file=sys.stderr)

@@ -3,7 +3,8 @@
 (function (root, factory) {
   const api = factory();
   if (typeof module === 'object' && module.exports) module.exports = api;
-  else root.SNA = api;
+  // Setel juga global untuk bundler ESM (Vite), yang menyediakan shim `module`.
+  root.SNA = api;
 })(typeof globalThis !== 'undefined' ? globalThis : this, function () {
   'use strict';
 
