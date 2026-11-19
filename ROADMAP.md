@@ -73,8 +73,16 @@ Checklist dari saran yang disetujui. Selesai semua pada sesi ini.
 - [x] Pisahkan error parse JSON vs error render di banner viewer; beri petunjuk `./run.sh serve` kalau `fetch` diblokir
 - [x] Tambah test regresi mention-only node (13 test Node)
 
+## Pengumpulan data dari web (tanpa terminal)
+- [x] `llm_server.py` menyediakan `/api/scrape/{start,status,cancel}` + `/api/login/{start,status,confirm,cancel}`; job background dengan progres, log, dan perlindungan proses ganda
+- [x] `scrape_threads.py` mode `web-login` (Chromium tampak, deteksi cookie `sessionid`/`ds_user_id`, fallback marker) tanpa `input()`, plus `--web`, `--progress-file`, `--replace`
+- [x] Tulis `data.json` atomik + backup otomatis `data.json.bak` saat opsi "timpa" dipilih
+- [x] Halaman baru `ScrapePage.jsx` + rute `/scrape.html` + item sidebar "Pengumpulan Data": login, form profil/kata kunci/URL, gabung/timpa, progres, log, ringkasan data, unduh
+- [x] File progres/marker gitignored dan diblokir dari akses statis; server tetap terikat ke `127.0.0.1`
+- [x] 10 test Python baru (validasi input, progres atomik, backup, endpoint dengan scraper stub); verifikasi Playwright alur form → progres → data 1 postingan tanpa page error
+
 ## Verifikasi
-- `./run.sh test` → 8 test Python + 22 test Node lulus
+- `./run.sh test` → 26 test Python + 23 test Node lulus (termasuk 10 test API scraping dengan stub)
 - Uji browser headless: data.json termuat via HTTP **dan** via input file; `file://` menampilkan petunjuk serve; JSON rusak tetap terdeteksi; toggle co-comment tanpa page error
 - `SNA.build(data.posts)` → 665 akun · 753 relasi · 20 komunitas (default)
 - Filter tanggal & toggle co-comment sudah diuji terhadap data nyata

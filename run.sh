@@ -5,7 +5,7 @@
 #   ./run.sh keyword "<kata kunci>" [jumlah_post] [max_komentar]
 #   ./run.sh post <url_postingan> [max_komentar]
 #   ./run.sh build                                  # build tampilan React + Tailwind ke dist/
-#   ./run.sh serve [port]                           # viewer + halaman sentimen di localhost:8000
+#   ./run.sh serve [port]                           # viewer + sentimen + pengumpulan data di localhost:8000
 #   ./run.sh migrate                                # migrasi data.json lama ke schema baru
 #   ./run.sh analyze [opsi]                         # analisis konten via LLM (.env -> llm_analysis.json)
 #   ./run.sh test                                   # jalankan unit test

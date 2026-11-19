@@ -13,6 +13,9 @@ llm_analysis.json
 llm_analysis.json.tmp
 llm_progress.json
 llm_analysis.lock
+scrape_progress.json
+login_progress.json
+login_selesai.marker
 .DS_Store
 node_modules/
 dist/

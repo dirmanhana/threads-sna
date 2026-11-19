@@ -10,7 +10,11 @@ Pakai (lebih mudah lewat ./run.sh, lihat README):
     python scrape_threads.py keyword "kata kunci" --max-posts 15 # cari postingan berdasarkan kata kunci
     python scrape_threads.py post https://www.threads.com/@akun/post/XXXX
 
-Hasil: data.json (hasil baru digabung dengan yang lama). Skema satu postingan:
+Dipicu dari halaman web (/scrape.html): mode `web-login` membuka Chromium
+tanpa input(), dan flag --web/--progress-file/--replace dipakai llm_server.py.
+
+Hasil: data.json (hasil baru digabung dengan yang lama, kecuali --replace).
+Skema satu postingan:
     {
       code, url, author, text,             # text = isi post + gabungan thread
       timestamp, likes,                    # bisa null
@@ -19,7 +23,7 @@ Hasil: data.json (hasil baru digabung dengan yang lama). Skema satu postingan:
       scraped_at
     }
 """
-import argparse, json, math, os, random, re, time
+import argparse, json, math, os, random, re, shutil, sys, time
 from datetime import datetime, timezone
 from urllib.parse import quote
 from playwright.sync_api import sync_playwright
@@ -28,7 +32,30 @@ BASE = "https://www.threads.com"
 PROFILE_DIR = "./threads_profile"   # sesi login disimpan di sini
 OUT = "data.json"
 FAILED = "failed.json"
+PROGRESS = "scrape_progress.json"
+LOGIN_MARKER = "login_selesai.marker"
 LINK_RE = re.compile(r"/@([^/]+)/post/([\w-]+)")
+SESSION_COOKIES = ("sessionid", "ds_user_id")   # cookie=.threads.com hasil login
+
+# Saat dipicu dari web, semua log lewat stderr supaya llm_server.py bisa
+# mengumpulkannya dan menampilkannya di halaman "Pengumpulan Data".
+def log(*args):
+    print(*args, file=sys.stderr, flush=True)
+
+
+def write_progress(path, phase, done=0, total=0, message="", **extra):
+    """Tulis status job secara atomik supaya pembaca (server/browser) tidak melihat JSON setengah jadi."""
+    if not path:
+        return
+    data = {"phase": phase, "done": int(done), "total": int(total), "message": str(message)}
+    data.update(extra)
+    tmp = str(path) + ".tmp"
+    try:
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False)
+        os.replace(tmp, path)
+    except OSError:
+        pass
 
 # Cari semua link /@user/post/KODE, naik ke container terbesar yang hanya memuat 1 postingan.
 # `parent` adalah heuristik best-effort untuk balasan bersarang: kode lain yang muncul
@@ -238,14 +265,89 @@ def load_posts(path):
         return {}
 
 
-def save_json(path, data):
-    with open(path, "w", encoding="utf-8") as f:
+def save_json(path, data, backup=False):
+    """Tulis JSON atomik. backup=True menyimpan versi lama ke <nama>.bak dulu."""
+    if backup and os.path.exists(path):
+        try:
+            shutil.copy2(path, str(path) + ".bak")
+        except OSError as e:
+            log("! gagal membuat backup:", e)
+    tmp = str(path) + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
+    os.replace(tmp, path)
+
+
+def logged_in(ctx):
+    """Cek cookie sesi Threads pada persistent context."""
+    try:
+        cookies = ctx.cookies()
+    except Exception:
+        return False
+    return any(c.get("name") in SESSION_COOKIES and c.get("value")
+               and "threads" in c.get("domain", "")
+               for c in cookies)
+
+
+def web_login(profile_dir, marker, progress_file, timeout):
+    """Login interaktif untuk dipicu dari web: buka Chromium tampak, tunggu cookie sesi.
+
+    Tidak memakai input() seperti mode `login` CLI. Selesai bila cookie sesi
+    Threads muncul ATAU berkas marker dibuat tombol "Saya sudah login" di UI.
+    """
+    marker = str(marker) if marker else None
+    if marker:
+        try:
+            os.remove(marker)
+        except OSError:
+            pass
+    write_progress(progress_file, "login", message="Membuka browser login Threads…")
+    ok, note = False, ""
+    with sync_playwright() as p:
+        try:
+            ctx = p.chromium.launch_persistent_context(profile_dir, headless=False, locale="id-ID")
+        except Exception as exc:                      # mis. tidak ada DISPLAY di server headless
+            note = "Gagal membuka browser: %s" % exc
+            log("!", note)
+            write_progress(progress_file, "error", message=note, error=note)
+            return 2
+        page = ctx.pages[0] if ctx.pages else ctx.new_page()
+        try:
+            page.goto(BASE + "/login", wait_until="domcontentloaded")
+        except Exception as exc:
+            log("! gagal membuka halaman login:", exc)
+        write_progress(progress_file, "login", message="Silakan login di jendela Chromium yang terbuka.")
+        deadline = time.time() + max(30, int(timeout))
+        while time.time() < deadline:
+            try:
+                if marker and os.path.exists(marker):
+                    ok = True
+                    note = "Login dikonfirmasi dari halaman web."
+                    break
+                if logged_in(ctx):
+                    ok = True
+                    note = "Sesi login terdeteksi."
+                    break
+            except Exception as exc:
+                log("! pengecekan sesi gagal:", exc)
+            page.wait_for_timeout(2000) if page else time.sleep(2)
+        try:
+            page.wait_for_timeout(1500)   # beri waktu cookie ditulis ke disk
+        except Exception:
+            pass
+        ctx.close()
+    if not ok:
+        note = "Login tidak terdeteksi dalam batas waktu."
+        log("!", note)
+    write_progress(progress_file, "done" if ok else "error", message=note,
+                   error="" if ok else note, success=ok)
+    log(note)
+    return 0 if ok else 2
 
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("mode", choices=["login", "profile", "keyword", "post"])
+    ap.add_argument("mode", choices=["login", "web-login", "profile", "keyword", "post"])
     ap.add_argument("target", nargs="?")
     ap.add_argument("--max-posts", type=int, default=10)
     ap.add_argument("--max-replies", type=int, default=400, help="batas komentar per postingan")
@@ -253,11 +355,32 @@ def main():
     ap.add_argument("--delay", type=float, default=3.0, help="jeda dasar antar postingan (detik)")
     ap.add_argument("--profile-dir", default=PROFILE_DIR, help="direktori sesi login")
     ap.add_argument("--show", action="store_true", help="tampilkan browser")
+    ap.add_argument("--web", action="store_true", help="dipicu server web: log ke stderr + progres")
+    ap.add_argument("--progress-file", default="", help="tulis status job ke JSON ini")
+    ap.add_argument("--replace", action="store_true", help="timpa data lama (default: digabung)")
+    ap.add_argument("--login-timeout", type=int, default=300, help="batas tunggu login web (detik)")
+    ap.add_argument("--login-marker", default="", help="berkas penanda konfirmasi login dari web")
     a = ap.parse_args()
+    say = log if a.web else print
+    prog = a.progress_file if a.web else ""
+
+    if a.mode == "web-login":
+        return web_login(a.profile_dir, a.login_marker, prog, a.login_timeout)
+
+    if a.mode in ("profile", "keyword", "post") and not a.target:
+        say("! target belum diisi")
+        write_progress(prog, "error", message="Target belum diisi.")
+        return 2
 
     with sync_playwright() as p:
-        ctx = p.chromium.launch_persistent_context(
-            a.profile_dir, headless=not (a.show or a.mode == "login"), locale="id-ID")
+        try:
+            ctx = p.chromium.launch_persistent_context(
+                a.profile_dir, headless=not (a.show or a.mode == "login"), locale="id-ID")
+        except Exception as exc:
+            say("! gagal membuka browser:", exc)
+            write_progress(prog, "error", message="Gagal membuka browser: %s" % exc,
+                           error=str(exc))
+            return 2
         page = ctx.pages[0] if ctx.pages else ctx.new_page()
 
         if a.mode == "login":
@@ -266,16 +389,25 @@ def main():
             ctx.close()
             return
 
+        write_progress(prog, "discover", message="Mencari postingan…")
         if a.mode == "profile":
             urls = get_profile_posts(page, a.target.lstrip("@"), a.max_posts)
         elif a.mode == "keyword":
             urls = get_keyword_posts(page, a.target, a.max_posts)
         else:
             urls = [a.target]
-        print(f"{len(urls)} postingan akan diambil")
+        say(f"{len(urls)} postingan akan diambil")
+        if not urls:
+            ctx.close()
+            note = "Tidak ada postingan ditemukan. Periksa target atau sesi login."
+            say("!", note)
+            write_progress(prog, "error", message=note, error=note)
+            return 1
 
-        posts = load_posts(a.out)
+        posts = {} if a.replace else load_posts(a.out)
         failed, ok = [], 0
+        write_progress(prog, "scrape", done=0, total=len(urls),
+                       message=f"Mengambil 0 dari {len(urls)} postingan…")
         for i, u in enumerate(urls, 1):
             r = None
             for attempt in range(1, 3):
@@ -284,16 +416,19 @@ def main():
                     if r:
                         break
                 except Exception as e:                       # noqa: BLE001 - lanjut ke retry
-                    print(f"  ! percobaan {attempt} gagal: {e}")
+                    say(f"  ! percobaan {attempt} gagal: {e}")
                 time.sleep(1.5 * attempt)
             if r:
                 posts[r["code"]] = r
                 ok += 1
-                print(f"[{i}/{len(urls)}] @{r['author']}: "
-                      f"{len(r['replies'])} komentar · {len(r['thread'])} thread")
+                say(f"[{i}/{len(urls)}] @{r['author']}: "
+                    f"{len(r['replies'])} komentar · {len(r['thread'])} thread")
             else:
                 failed.append({"url": u, "time": datetime.now(timezone.utc).isoformat(timespec="seconds")})
-                print(f"[{i}/{len(urls)}] ! gagal: {u}")
+                say(f"[{i}/{len(urls)}] ! gagal: {u}")
+            write_progress(prog, "scrape", done=i, total=len(urls),
+                           message=f"Mengambil {i} dari {len(urls)} postingan…",
+                           saved=ok, failed=len(failed))
             if i < len(urls):
                 time.sleep(max(0.2, a.delay * random.uniform(0.7, 1.3)))
 
@@ -306,16 +441,23 @@ def main():
                     old = []
             seen = {x["url"] for x in old}
             save_json(FAILED, old + [x for x in failed if x["url"] not in seen])
-            print("URL gagal dicatat ke", FAILED)
+            say("URL gagal dicatat ke", FAILED)
         if ok or not failed:
-            save_json(a.out, {"posts": list(posts.values())})
-            print("Tersimpan ke", a.out)
+            save_json(a.out, {"posts": list(posts.values())}, backup=a.replace)
+            say("Tersimpan ke", a.out)
+            write_progress(prog, "done", done=len(urls), total=len(urls), saved=ok,
+                           message=f"Selesai · {ok} postingan tersimpan · {len(posts)} total di data.json")
         else:
-            print("Tidak ada hasil baru; file hasil tidak ditimpa.")
-            print("Jika semua postingan gagal, kemungkinan sesi login kedaluwarsa. "
-                  "Jalankan: ./run.sh login (atau periksa selector JS_EXTRACT).")
+            note = ("Tidak ada hasil baru; file hasil tidak ditimpa. "
+                    "Jika semua gagal, sesi login bisa kedaluwarsa — klik Login di halaman web.")
+            say(note)
+            write_progress(prog, "error", done=len(urls), total=len(urls), saved=0,
+                           message=note, error=note)
+            ctx.close()
+            return 1
         ctx.close()
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

@@ -8,6 +8,7 @@ const Icon = ({ d, className = 'w-4 h-4' }) => (
 
 const ICON_GRAPH = 'M12 2a3 3 0 1 0 0 6 3 3 0 0 0 0-6Zm-7 14a3 3 0 1 0 0 6 3 3 0 0 0 0-6Zm14 0a3 3 0 1 0 0 6 3 3 0 0 0 0-6Zm-7-5.5a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3Zm5.8-1.7-3.2 2.3a4.5 4.5 0 0 1-1.2 2.1l3.1 2.2a4.5 4.5 0 0 1 1.3-2.1l3.2-2.3-3.2-2.2ZM4.2 6.8l3.2 2.3a4.6 4.6 0 0 1 1.2-2.1L5.5 4.8A4.6 4.6 0 0 1 4.2 6.8Zm-1.6 10.5 3.2-2.3a4.5 4.5 0 0 1 2.3 2.2l3.1 2.2a4.5 4.5 0 0 1-2.2-2.2L2.6 17.3Z';
 const ICON_CHART = 'M4 13h4v7H4v-7Zm6-9h4v16h-4V4Zm6 5h4v11h-4V9Z';
+const ICON_DB = 'M12 3c-4.4 0-8 1.3-8 3s3.6 3 8 3 8-1.3 8-3-3.6-3-8-3Zm0 2c3.3 0 6 .8 6 1s-2.7 1-6 1-6-.8-6-1 2.7-1 6-1ZM4 8.2c1.1 1 3.6 1.8 8 1.8s6.9-.8 8-1.8V12c0 1.7-3.6 3-8 3s-8-1.3-8-3V8.2Zm0 5.2c1.1 1 3.6 1.8 8 1.8s6.9-.8 8-1.8V17c0 1.7-3.6 3-8 3s-8-1.3-8-3v-3.6Z';
 const ICON_MENU = 'M4 6h16v2H4V6Zm0 5h16v2H4v-2Zm0 5h16v2H4v-2Z';
 const ICON_CLOSE = 'M18.3 5.7 12 12l6.3 6.3-1.4 1.4L10.6 13.4 4.3 19.7 2.9 18.3 9.2 12 2.9 5.7l1.4-1.4 6.3 6.3 6.3-6.3 1.4 1.4Z';
 const ICON_SUN = 'M12 4V2m0 20v-2m8-8h2M2 12h2m13.7-5.7 1.4-1.4M4.9 19.1l1.4-1.4m11.4 0 1.4 1.4M4.9 4.9l1.4 1.4M12 7a5 5 0 1 0 0 10 5 5 0 0 0 0-10Z';
@@ -48,6 +49,7 @@ export default function Layout({ page, title, subtitle, children, actions, wide 
     <>
       <NavItem href="/viewer.html" active={page === 'viewer'} icon={ICON_GRAPH} label="Peta Jaringan" expanded={expanded} />
       <NavItem href="/sentimen.html" active={page === 'sentimen'} icon={ICON_CHART} label="Analisis Sentimen" expanded={expanded} />
+      <NavItem href="/scrape.html" active={page === 'scrape'} icon={ICON_DB} label="Pengumpulan Data" expanded={expanded} />
     </>
   );
 

@@ -1,6 +1,6 @@
 # Threads SNA
 
-Ambil postingan dan komentar dari Threads dengan Playwright, lalu lihat jaringannya: siapa posting apa, siapa mengomentari, siapa menyebut siapa. Viewer berjalan lokal di browser, tanpa backend.
+Ambil postingan dan komentar dari Threads dengan Playwright, lalu lihat jaringannya: siapa posting apa, siapa mengomentari, siapa menyebut siapa. Semua proses berjalan lokal; pengumpulan data bisa dipicu lewat terminal **atau langsung dari browser**.
 
 ## Instalasi
 
@@ -34,6 +34,7 @@ Untuk fitur analisis konten berbasis LLM, salin `.env.example` menjadi `.env` la
 ./run.sh build                              # build tampilan React + Tailwind ke dist/
 ./run.sh serve                              # buka http://localhost:8000/viewer.html
                                             # analisis sentimen: http://localhost:8000/sentimen.html
+                                             # pengumpulan data: http://localhost:8000/scrape.html
 ./run.sh migrate                            # migrasi data.json lama ke schema baru
 ./run.sh analyze                            # analisis konten via LLM -> llm_analysis.json
 ./run.sh analyze --limit 100 --dry-run      # cek rencana tanpa panggil API
@@ -43,6 +44,19 @@ Untuk fitur analisis konten berbasis LLM, salin `.env.example` menjadi `.env` la
 Opsi lanjutan lewat `scrape_threads.py` langsung: `--out`, `--delay` (jeda dasar antar postingan, detik), `--max-replies`, `--profile-dir`, `--show`. Lewat `run.sh` bisa diatur dengan env: `OUT=nama.json DELAY=5 PROFILE_DIR=./akun_lain ./run.sh keyword "umkm"`.
 
 Hasil disimpan ke `data.json` dan **digabung** dengan data lama (berdasarkan kode postingan). URL yang gagal dicatat ke `failed.json`. Jika semua postingan gagal dibaca, file hasil tidak ditimpa dan akan muncul peringatan kemungkinan sesi login kedaluwarsa.
+
+### Pengumpulan data dari browser (tanpa terminal)
+
+Jalankan `./run.sh serve` sekali, lalu buka **`http://localhost:8000/scrape.html`**. Halaman "Pengumpulan Data" di sidebar menyediakan alur lengkap:
+
+1. **Login** — tombol "Buka browser login" menyuruh server lokal membuka Chromium tampak. Login manual di jendela itu; deteksi cookie `.threads.com` berjalan otomatis. Tombol "Saya sudah login" hanya fallback. Sesi tersimpan di `threads_profile/` (gitignored) dan **tidak pernah dikirim ke browser**.
+2. **Ambil data** — pilih profil / kata kunci / URL postingan, jumlah postingan, batas komentar, dan opsi **gabungkan atau timpa** data lama. Opsi timpa tetap membuat backup `data.json.bak` sebelum menulis.
+3. **Pantau progres** — jumlah postingan yang selesai, pesan, dan log ditampilkan langsung. Job berjalan di server, jadi halaman boleh ditutup dan dibuka lagi.
+4. **Pakai hasilnya** — tombol "Buka di peta jaringan" memuat `data.json` yang baru.
+
+Catatan: scraper tetap memakai Playwright sungguhan, jadi **login pertama memerlukan desktop dengan tampilan Chromium**. Di server headless murni, lakukan `./run.sh login` sekali lewat terminal. Endpoint hanya di-bind ke `127.0.0.1` — jangan diubah ke `0.0.0.0` karena itu akan memungkinkan pihak lain memicu browser dengan sesi Anda.
+
+API yang dipakai halaman ini: `GET /api/scrape/status`, `POST /api/scrape/start`, `/api/scrape/cancel`, `GET /api/login/status`, `POST /api/login/start`, `/api/login/confirm`, `/api/login/cancel`. `scrape_progress.json`, `login_progress.json`, dan `login_selesai.marker` adalah file sementara (gitignored) dan diblokir dari akses statis.
 
 ## Schema `data.json`
 
@@ -89,15 +103,16 @@ Data lama (sebelum schema ini) bisa dimigrasi dengan `./run.sh migrate`. Backup 
 
 ## Tampilan dashboard (React + Tailwind)
 
-Kedua halaman sekarang adalah satu aplikasi React + Vite + Tailwind CSS v4 yang dibangun ke `dist/`:
+Ketiga halaman sekarang adalah satu aplikasi React + Vite + Tailwind CSS v4 yang dibangun ke `dist/`:
 
 - `src/pages/ViewerPage.jsx` — peta jaringan + semua fitur viewer di atas (D3 force graph, filter, panel, time-lapse, anomali, timeline, ekspor).
 - `src/pages/SentimentPage.jsx` — halaman label sentimen per komentar.
+- `src/pages/ScrapePage.jsx` — pengumpulan data: login, form scraping, progres, dan ringkasan `data.json`.
 - `src/components/` — layout sidebar/header ala dashboard, kanvas graf, timeline, dan panel informasi.
 - `src/lib/` — helper murni, utilitas fetch/unduh, dan modul ekspor; `viewer_core.js` tetap dipakai apa adanya supaya test Node tidak berubah.
-- `src/App.jsx` memilih halaman dari `pathname`: `/sentimen.html` → sentimen, selain itu → viewer.
+- `src/App.jsx` memilih halaman dari `pathname`: `/sentimen.html` → sentimen, `/scrape.html` → pengumpulan data, selain itu → viewer.
 
-`llm_server.py` menyajikan `dist/` bila sudah dibangun: `/viewer.html` dan `/sentimen.html` memuat `index.html` yang sama, aset dari `/assets/`, sementara `data.json` dan `llm_analysis.json` tetap dibaca dari root proyek. Sebelum `npm run build`, server fallback ke file HTML lama. `node_modules/` dan `dist/` tidak masuk git.
+`llm_server.py` menyajikan `dist/` bila sudah dibangun: `/viewer.html`, `/sentimen.html`, dan `/scrape.html` memuat `index.html` yang sama, aset dari `/assets/`, sementara `data.json` dan `llm_analysis.json` tetap dibaca dari root proyek. Sebelum `npm run build`, server fallback ke file HTML lama. `node_modules/` dan `dist/` tidak masuk git. Server yang sama juga menjadi API lokal untuk analisis LLM **dan** pengumpulan data.
 
 ## Analisis konten (LLM)
 
@@ -113,7 +128,7 @@ cp .env.example .env          # lalu isi LLM_API_KEY (dan base URL/model bila pe
 ./run.sh analyze --dry-run    # lihat rencana tanpa memanggil API
 ```
 
-- `./run.sh serve` menjalankan `llm_server.py`, yaitu server statis **sekaligus** API analisis dalam satu proses (menggantikan `python -m http.server`). Jadi server lokal kecil itu ikut berjalan otomatis—tidak perlu perintah terpisah—dan tombol analisis langsung berfungsi.
+- `./run.sh serve` menjalankan `llm_server.py`, yaitu server statis **sekaligus** API analisis dan API pengumpulan data dalam satu proses (menggantikan `python -m http.server`). Jadi server lokal kecil itu ikut berjalan otomatis—tidak perlu perintah terpisah—dan tombol analisis/scraping langsung berfungsi.
 - Kredensial dibaca dari `.env` oleh `llm_analyze.py` dan **tidak pernah dikirim ke browser**. Tombol **▶ Jalankan analisis** hanya mengirim perintah (opsi `limit`, batch, timeout) ke `/api/analyze` pada server lokal; server yang menjalankan skrip dan menulis `llm_analysis.json` (gitignored). Server juga menyembunyikan `.env` dari `fetch` statis.
 - Progres batch ditampilkan di halaman lewat `/api/status` (file progres sementara `llm_progress.json`, gitignored). Analisis yang sudah berjalan—termasuk yang dipicu dari terminal—tidak bisa dijalankan dua kali bersamaan; halaman akan menampilkan statusnya.
 - `viewer.html` tidak memuat hasil LLM sama sekali, sehingga peta jaringan tetap berfungsi normal walaupun analisis belum dijalankan. Bila server analisis tidak tersedia (misal halaman dibuka dengan `python -m http.server` biasa), halaman sentimen tetap bisa menampilkan hasil lama atau memuat berkas manual.
