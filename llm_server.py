@@ -195,6 +195,7 @@ def main() -> int:
     server = ThreadingHTTPServer((a.host, a.port), handler)
     print("Viewer:   http://%s:%d/viewer.html" % (a.host, a.port), file=sys.stderr)
     print("Sentimen: http://%s:%d/sentimen.html" % (a.host, a.port), file=sys.stderr)
+    print("API analisis lokal: /api/analyze, /api/status (kunci tetap di .env)", file=sys.stderr)
     print("Server lokal aktif. Tekan Ctrl+C untuk berhenti.", file=sys.stderr)
     try:
         server.serve_forever()

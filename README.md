@@ -80,7 +80,7 @@ Graf menjawab **siapa bicara dengan siapa**; bagian ini menjawab **apa yang mere
 
 ```bash
 cp .env.example .env          # lalu isi LLM_API_KEY (dan base URL/model bila perlu)
-./run.sh serve                # buka http://localhost:8000/sentimen.html
+./run.sh serve                # otomatis menyalakan server lokal + buka http://localhost:8000/sentimen.html
 # lalu klik tombol ▶ Jalankan analisis di halaman tersebut
 
 ./run.sh analyze              # alternatif lewat terminal: baca data.json -> llm_analysis.json
@@ -88,6 +88,7 @@ cp .env.example .env          # lalu isi LLM_API_KEY (dan base URL/model bila pe
 ./run.sh analyze --dry-run    # lihat rencana tanpa memanggil API
 ```
 
+- `./run.sh serve` menjalankan `llm_server.py`, yaitu server statis **sekaligus** API analisis dalam satu proses (menggantikan `python -m http.server`). Jadi server lokal kecil itu ikut berjalan otomatis—tidak perlu perintah terpisah—dan tombol analisis langsung berfungsi.
 - Kredensial dibaca dari `.env` oleh `llm_analyze.py` dan **tidak pernah dikirim ke browser**. Tombol **▶ Jalankan analisis** hanya mengirim perintah (opsi `limit`, batch, timeout) ke `/api/analyze` pada server lokal; server yang menjalankan skrip dan menulis `llm_analysis.json` (gitignored). Server juga menyembunyikan `.env` dari `fetch` statis.
 - Progres batch ditampilkan di halaman lewat `/api/status` (file progres sementara `llm_progress.json`, gitignored). Analisis yang sudah berjalan—termasuk yang dipicu dari terminal—tidak bisa dijalankan dua kali bersamaan; halaman akan menampilkan statusnya.
 - `viewer.html` tidak memuat hasil LLM sama sekali, sehingga peta jaringan tetap berfungsi normal walaupun analisis belum dijalankan. Bila server analisis tidak tersedia (misal halaman dibuka dengan `python -m http.server` biasa), halaman sentimen tetap bisa menampilkan hasil lama atau memuat berkas manual.
