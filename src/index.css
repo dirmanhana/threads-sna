@@ -30,7 +30,7 @@ svg text { fill: var(--fg); font-size: 11px; pointer-events: none; }
   --color-brand-300: #b7acff;
   --color-brand-400: #9c8cff;
   --color-brand-500: #8470ff;
-  --color-brand-600: #755ff8;
+  --color-brand-600: #6d56f0;
   --color-brand-700: #5d47de;
   --color-brand-800: #4634b1;
   --color-brand-900: #2f227c;
@@ -45,9 +45,10 @@ svg text { fill: var(--fg); font-size: 11px; pointer-events: none; }
   html { color-scheme: light; }
   html.dark { color-scheme: dark; }
   body {
-    @apply bg-slate-50 text-slate-800 antialiased dark:bg-gray-900 dark:text-gray-100;
+    @apply bg-slate-100 text-slate-800 antialiased dark:bg-gray-900 dark:text-gray-100;
     font-family: var(--font-sans);
   }
+  :focus-visible { outline: 2px solid var(--color-brand-500); outline-offset: 2px; }
   * { scrollbar-width: thin; scrollbar-color: rgb(148 163 184 / .5) transparent; }
   *::-webkit-scrollbar { width: 8px; height: 8px; }
   *::-webkit-scrollbar-thumb { background: rgb(148 163 184 / .5); border-radius: 8px; }
@@ -55,7 +56,7 @@ svg text { fill: var(--fg); font-size: 11px; pointer-events: none; }
 
 @layer components {
   .card {
-    @apply rounded-2xl border border-slate-200 bg-white shadow-card dark:border-gray-700/60 dark:bg-gray-800;
+    @apply rounded-xl border border-slate-200 bg-white shadow-card dark:border-gray-700/60 dark:bg-gray-800;
   }
   .btn {
     @apply inline-flex items-center justify-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5
@@ -71,7 +72,7 @@ svg text { fill: var(--fg); font-size: 11px; pointer-events: none; }
       dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100 dark:focus:ring-brand-900;
   }
   .kpi {
-    @apply rounded-2xl border border-slate-200 bg-white p-4 shadow-card dark:border-gray-700/60 dark:bg-gray-800;
+    @apply rounded-xl border border-slate-200 bg-white p-4 shadow-card dark:border-gray-700/60 dark:bg-gray-800;
   }
   .badge,
   .badge-positif, .badge-negatif, .badge-netral,

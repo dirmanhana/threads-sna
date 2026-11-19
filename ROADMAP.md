@@ -81,8 +81,21 @@ Checklist dari saran yang disetujui. Selesai semua pada sesi ini.
 - [x] File progres/marker gitignored dan diblokir dari akses statis; server tetap terikat ke `127.0.0.1`
 - [x] 10 test Python baru (validasi input, progres atomik, backup, endpoint dengan scraper stub); verifikasi Playwright alur form → progres → data 1 postingan tanpa page error
 
+## Tata letak Mosaic (tahap 1–2)
+- [x] Shell baru: sidebar bergrup (Utama/Analisis/Data) 80 px ↔ 256 px, header 64 px dengan pencarian global + status data + toggle tema
+- [x] Judul halaman dipindah ke area konten lewat `PageHeader` (30 px bold) dengan baris aksi di kanan
+- [x] Komponen kartu: `Card`/`CardHeader`/`CardBody`, `KpiCard`, `StatusPill`, `EmptyState`, `MiniCharts` (bar + donut SVG, tanpa Chart.js)
+- [x] Token `.card`/`.kpi` diseragamkan ke `rounded-xl`; body memakai `slate-100`; kontras teks sekunder dinaikkan
+- [x] Halaman **Ringkasan** di `/` (juga `/index.html`, `/ringkasan.html`): KPI, volume komentar, donut sentimen, tabel aktor, aktivitas, sinyal risiko, topik LLM
+- [x] Pencarian global → `/viewer.html?focus=<akun>`; `ViewerPage` membaca parameter dan memfokuskan akun setelah data termuat
+- [x] `llm_server.py` memetakan `/`, `/index.html`, `/ringkasan.html` ke build React
+
 ## Verifikasi
 - `./run.sh test` → 26 test Python + 23 test Node lulus (termasuk 10 test API scraping dengan stub)
+- Playwright: `/`, `/ringkasan.html`, `/index.html`, `/viewer.html`, `/sentimen.html`, `/scrape.html` tanpa page error; desktop 1440 px dan ponsel 390 px tanpa overflow horizontal
+- Pencarian global “anabel” → klik hasil → `/viewer.html?focus=anabelpolitik` dan panel akun langsung terbuka
+- Tema gelap/terang, sidebar 80 ↔ 256 px, dan donut/bar chart terverifikasi lewat DOM
+- Audit kontras halaman Ringkasan: 0 teks di bawah ambang WCAG AA pada mode terang
 - Uji browser headless: data.json termuat via HTTP **dan** via input file; `file://` menampilkan petunjuk serve; JSON rusak tetap terdeteksi; toggle co-comment tanpa page error
 - `SNA.build(data.posts)` → 665 akun · 753 relasi · 20 komunitas (default)
 - Filter tanggal & toggle co-comment sudah diuji terhadap data nyata

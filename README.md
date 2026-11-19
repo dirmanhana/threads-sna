@@ -32,9 +32,10 @@ Untuk fitur analisis konten berbasis LLM, salin `.env.example` menjadi `.env` la
 ./run.sh profile akun_target 10             # atau ambil dari satu profil
 ./run.sh post https://www.threads.com/@akun/post/XXXX
 ./run.sh build                              # build tampilan React + Tailwind ke dist/
-./run.sh serve                              # buka http://localhost:8000/viewer.html
-                                            # analisis sentimen: http://localhost:8000/sentimen.html
-                                             # pengumpulan data: http://localhost:8000/scrape.html
+./run.sh serve                              # buka http://localhost:8000/ (Ringkasan)
+                                            # peta: http://localhost:8000/viewer.html
+                                            # sentimen: http://localhost:8000/sentimen.html
+                                            # data: http://localhost:8000/scrape.html
 ./run.sh migrate                            # migrasi data.json lama ke schema baru
 ./run.sh analyze                            # analisis konten via LLM -> llm_analysis.json
 ./run.sh analyze --limit 100 --dry-run      # cek rencana tanpa panggil API
@@ -103,16 +104,19 @@ Data lama (sebelum schema ini) bisa dimigrasi dengan `./run.sh migrate`. Backup 
 
 ## Tampilan dashboard (React + Tailwind)
 
-Ketiga halaman sekarang adalah satu aplikasi React + Vite + Tailwind CSS v4 yang dibangun ke `dist/`:
+Ketiga halaman sekarang adalah satu aplikasi React + Vite + Tailwind CSS v4 yang dibangun ke `dist/`. Tata letaknya mengikuti kerangka **Mosaic Lite** (sidebar bergrup, header 64 px, judul halaman 30 px, grid 12 kolom, kartu `rounded-xl`):
 
+- `src/pages/SummaryPage.jsx` — **Ringkasan** (beranda `/`): KPI postingan/komentar/akun/relasi, grafik volume komentar, donut sentimen, tabel aktor teratas, aktivitas terakhir, sinyal risiko (toksik/spam/lonjakan), dan topik LLM.
 - `src/pages/ViewerPage.jsx` — peta jaringan + semua fitur viewer di atas (D3 force graph, filter, panel, time-lapse, anomali, timeline, ekspor).
 - `src/pages/SentimentPage.jsx` — halaman label sentimen per komentar.
 - `src/pages/ScrapePage.jsx` — pengumpulan data: login, form scraping, progres, dan ringkasan `data.json`.
-- `src/components/` — layout sidebar/header ala dashboard, kanvas graf, timeline, dan panel informasi.
+- `src/components/` — `Layout` (sidebar/header/pencarian global), `PageHeader`, `Card`, `KpiCard`, `StatusPill`, `EmptyState`, `MiniCharts` (bar/donut tanpa Chart.js), kanvas graf, timeline, dan panel informasi.
 - `src/lib/` — helper murni, utilitas fetch/unduh, dan modul ekspor; `viewer_core.js` tetap dipakai apa adanya supaya test Node tidak berubah.
-- `src/App.jsx` memilih halaman dari `pathname`: `/sentimen.html` → sentimen, `/scrape.html` → pengumpulan data, selain itu → viewer.
+- `src/App.jsx` memilih halaman dari `pathname`: `/sentimen.html` → sentimen, `/scrape.html` → pengumpulan data, `/viewer.html` → peta, selain itu (`/`, `/ringkasan.html`, `/index.html`) → Ringkasan.
 
-`llm_server.py` menyajikan `dist/` bila sudah dibangun: `/viewer.html`, `/sentimen.html`, dan `/scrape.html` memuat `index.html` yang sama, aset dari `/assets/`, sementara `data.json` dan `llm_analysis.json` tetap dibaca dari root proyek. Sebelum `npm run build`, server fallback ke file HTML lama. `node_modules/` dan `dist/` tidak masuk git. Server yang sama juga menjadi API lokal untuk analisis LLM **dan** pengumpulan data.
+Header memuat **pencarian global** akun/postingan; memilih hasil membuka `/viewer.html?focus=<akun>` dan langsung memfokuskan akun itu. Toggle tema ada di header, dan sidebar bisa diringkas (80 px) atau dilebarkan (256 px).
+
+`llm_server.py` menyajikan `dist/` bila sudah dibangun: `/`, `/index.html`, `/ringkasan.html`, `/viewer.html`, `/sentimen.html`, dan `/scrape.html` memuat `index.html` yang sama, aset dari `/assets/`, sementara `data.json` dan `llm_analysis.json` tetap dibaca dari root proyek. Sebelum `npm run build`, server fallback ke file HTML lama. `node_modules/` dan `dist/` tidak masuk git. Server yang sama juga menjadi API lokal untuk analisis LLM **dan** pengumpulan data.
 
 ## Analisis konten (LLM)
 

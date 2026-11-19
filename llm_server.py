@@ -315,15 +315,16 @@ class Handler(SimpleHTTPRequestHandler):
     def translate_path(self, path):
         """Sajikan build React dari dist/; data.json tetap dari ROOT.
 
-        /viewer.html, /sentimen.html, dan /scrape.html adalah tiga "halaman"
-        SPA yang sama, dipilih oleh src/App.jsx berdasarkan pathname. Jika
-        dist/ belum ada, fallback ke file HTML lama agar server tetap berguna.
+        /viewer.html, /sentimen.html, /scrape.html, dan /ringkasan.html adalah
+        halaman SPA yang sama, dipilih oleh src/App.jsx berdasarkan pathname.
+        Jika dist/ belum ada, fallback ke file HTML lama agar server tetap berguna.
         """
         clean = path.split("?", 1)[0].split("#", 1)[0]
         has_dist = (DIST / "index.html").exists()
         if clean == "/" and has_dist:
             return str(DIST / "index.html")
-        if clean in ("/viewer.html", "/sentimen.html", "/scrape.html") and has_dist:
+        if clean in ("/viewer.html", "/sentimen.html", "/scrape.html",
+                     "/ringkasan.html", "/summary.html", "/index.html") and has_dist:
             return str(DIST / "index.html")
         if clean.startswith("/assets/") and has_dist:
             return str(DIST / clean.lstrip("/"))
@@ -510,6 +511,7 @@ def main() -> int:
     server = ThreadingHTTPServer((a.host, a.port), handler)
     mode = "build React (dist/)" if (DIST / "index.html").exists() else "HTML lama (jalankan npm run build)"
     print("Mode tampilan: %s" % mode, file=sys.stderr)
+    print("Ringkasan: http://%s:%d/" % (a.host, a.port), file=sys.stderr)
     print("Viewer:   http://%s:%d/viewer.html" % (a.host, a.port), file=sys.stderr)
     print("Sentimen: http://%s:%d/sentimen.html" % (a.host, a.port), file=sys.stderr)
     print("Data:     http://%s:%d/scrape.html" % (a.host, a.port), file=sys.stderr)

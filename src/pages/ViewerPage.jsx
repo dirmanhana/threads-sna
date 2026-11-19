@@ -224,6 +224,18 @@ export default function ViewerPage() {
   };
   const unfocus = () => { setFocus(null); setIsolate(false); setPanelUser(null); setActor(''); setPanelMode({ kind: 'default' }); };
 
+  /* Pencarian global mengarah ke /viewer.html?focus=<akun>. */
+  const focusApplied = useRef(false);
+  useEffect(() => {
+    if (focusApplied.current || !baseGraph.nodes.length) return;
+    focusApplied.current = true;
+    const raw = (new URLSearchParams(globalThis.location.search).get('focus') || '').trim().replace(/^@/, '');
+    if (!raw) return;
+    const hit = baseGraph.nodes.find((n) => n.id.toLowerCase() === raw.toLowerCase());
+    if (!hit) { setWarn(`Akun @${raw} tidak ditemukan di graf.`); return; }
+    focusUser(hit.id, true);
+  }, [baseGraph]);
+
   const onNodeClick = (id) => focusUser(id, true);
   const onLinkClick = (l) => { setLinkDetail(l); setPanelUser(null); setPanelMode({ kind: 'link' }); };
   const onActor = (id) => {
@@ -275,7 +287,7 @@ export default function ViewerPage() {
   return (
     <Layout page="viewer" title="Peta Jaringan" subtitle="Siapa bicara dengan siapa — interaktif, lokal, tanpa backend"
       wide actions={actions}>
-      <div className="flex flex-col gap-3" style={{ height: 'calc(100vh - 138px)', minHeight: 620 }}>
+      <div className="flex flex-col gap-3" style={{ height: 'calc(100vh - 248px)', minHeight: 620 }}>
         {warn && (
           <div className="rounded-xl bg-red-700 px-4 py-2.5 text-sm text-white">{warn}
             <button className="ml-3 underline" onClick={() => setWarn('')}>tutup</button>
