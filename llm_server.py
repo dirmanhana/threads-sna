@@ -23,6 +23,7 @@ import argparse
 import json
 import os
 import re
+import secrets
 import signal
 import sqlite3
 import subprocess
@@ -46,6 +47,7 @@ _state = {"proc": None, "lock": threading.Lock(), "log": [], "error": None, "arg
 _job = {"proc": None, "lock": threading.Lock(), "log": [], "error": None, "args": None}
 _login = {"proc": None, "lock": threading.Lock(), "log": [], "error": None}
 _browser_lock = threading.Lock()
+API_TOKEN = secrets.token_urlsafe(32)
 SENSITIVE = (
     "/.env", "/llm_analysis.lock", "/llm_progress.json",
     "/scrape_progress.json", "/login_progress.json", "/login_selesai.marker",
@@ -343,10 +345,39 @@ class Handler(SimpleHTTPRequestHandler):
         except Exception:
             return {}
 
+    # ---------- pengamanan API lokal ----------
+
+    def _loopback_names(self):
+        port = self.server.server_address[1]
+        names = {"127.0.0.1", "localhost", "[::1]"}
+        return names | {f"{name}:{port}" for name in names}
+
+    def host_allowed(self) -> bool:
+        """Tolak DNS rebinding: hanya Host loopback yang sah."""
+        host = (self.headers.get("Host") or "").strip().lower()
+        return bool(host) and host in {x.lower() for x in self._loopback_names()}
+
+    def origin_allowed(self) -> bool:
+        """Tolak CSRF lintas-origin; request tanpa Origin (CLI/tes) tetap boleh."""
+        origin = (self.headers.get("Origin") or "").strip().lower()
+        if not origin:
+            return True
+        return origin in {f"http://{x}".lower() for x in self._loopback_names()}
+
+    def token_allowed(self) -> bool:
+        got = self.headers.get("X-SNA-Token") or ""
+        return bool(got) and secrets.compare_digest(got, API_TOKEN)
+
     # ---------- GET ----------
 
     def do_GET(self):
         path = self.path.split("?", 1)[0]
+        if not self.host_allowed():
+            return self.reply(403, {"error": "Host tidak diizinkan."})
+        if path == "/api/session":
+            if not self.origin_allowed():
+                return self.reply(403, {"error": "Origin tidak diizinkan."})
+            return self.reply(200, {"token": API_TOKEN})
         if path in ("/api/status", "/api/result"):
             data = status_payload()
             return self.reply(200, data if path == "/api/status" else data.get("result"))
@@ -365,6 +396,13 @@ class Handler(SimpleHTTPRequestHandler):
 
     def do_POST(self):
         path = self.path.split("?", 1)[0]
+        if not self.host_allowed():
+            return self.reply(403, {"started": False, "message": "Host tidak diizinkan."})
+        if not self.origin_allowed():
+            return self.reply(403, {"started": False, "message": "Origin tidak diizinkan."})
+        if not self.token_allowed():
+            return self.reply(401, {"started": False, "message":
+                                    "Token API tidak valid. Muat ulang halaman."})
         routes = {
             "/api/analyze": self.post_analyze,
             "/api/scrape/start": self.post_scrape_start,
@@ -494,6 +532,8 @@ class Handler(SimpleHTTPRequestHandler):
         self.send_response(code)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Referrer-Policy", "no-referrer")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)

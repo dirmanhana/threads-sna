@@ -1,7 +1,10 @@
 import unittest
+from datetime import datetime, timezone
 from types import SimpleNamespace
 
-from scrape_threads import clean, normalize_post, parse_item, parse_num, scroll_collect, to_iso
+from scrape_threads import (build_reply_tree, clean, merge_post, normalize_post,
+                            parse_item, parse_item_full, parse_num, scroll_collect,
+                            to_iso)
 
 
 class TestHelpers(unittest.TestCase):
@@ -45,10 +48,93 @@ class TestParseItem(unittest.TestCase):
     def test_normalize_post_backward_compatible(self):
         p = normalize_post({"code": "A", "author": "dirman", "text": "x",
                             "replies": [{"code": "B", "author": "sari", "text": "y"}]})
-        for key in ("thread", "timestamp", "likes", "scraped_at"):
+        for key in ("thread", "timestamp", "timestamp_source", "likes", "scraped_at",
+                    "first_scraped_at", "last_scraped_at", "expected_replies",
+                    "truncated", "stop_reason"):
             self.assertIn(key, p)
-        for key in ("timestamp", "likes", "parent_code"):
+        for key in ("timestamp", "timestamp_source", "likes", "parent_code",
+                    "root_code", "depth", "reply_to_author", "first_seen_at",
+                    "last_seen_at", "still_present"):
             self.assertIn(key, p["replies"][0])
+
+
+class TestTimestamp(unittest.TestCase):
+    def test_waktu_relatif_jadi_estimasi(self):
+        now = datetime(2026, 10, 10, 12, 0, tzinfo=timezone.utc)
+        text, ts, _, source = parse_item_full(["2 j", "Halo"], "sari", now=now)
+        self.assertEqual(text, "Halo")
+        self.assertEqual(ts, "2026-10-10T10:00:00+00:00")
+        self.assertEqual(source, "estimated")
+
+    def test_network_mengalahkan_tanggal_dom(self):
+        _, ts, _, source = parse_item_full(
+            ["07/10/2026", "Halo"], "sari",
+            network_ts="2026-10-07T12:34:56+00:00")
+        self.assertEqual(ts, "2026-10-07T12:34:56+00:00")
+        self.assertEqual(source, "network")
+
+    def test_tanggal_jam_dom(self):
+        _, ts, _, source = parse_item_full(["07/10/2026 14:30", "Halo"], "sari")
+        self.assertTrue(ts.startswith("2026-10-07T"))
+        self.assertEqual(source, "dom")
+
+    def test_hint_balasan_tidak_masuk_teks(self):
+        meta = {}
+        text, _, _, _ = parse_item_full(["Lihat 12 balasan", "Halo"], "sari", meta=meta)
+        self.assertEqual(text, "Halo")
+        self.assertEqual(meta["expected_replies"], 12)
+
+
+class TestMerge(unittest.TestCase):
+    def test_merge_tidak_membuang_komentar_lama(self):
+        old = {"code": "P", "author": "a", "text": "x",
+               "scraped_at": "2026-10-01T00:00:00+00:00",
+               "replies": [
+                   {"code": "R1", "author": "b", "text": "lama"},
+                   {"code": "R2", "author": "c", "text": "tetap ada"},
+               ]}
+        new = {"code": "P", "author": "a", "text": "x",
+               "scraped_at": "2026-10-02T00:00:00+00:00",
+               "complete": False, "truncated": True,
+               "replies": [
+                   {"code": "R1", "author": "b", "text": "baru"},
+                   {"code": "R3", "author": "d", "text": "tambahan"},
+               ]}
+        p = merge_post(old, new, new["scraped_at"])
+        by = {r["code"]: r for r in p["replies"]}
+        self.assertEqual(set(by), {"R1", "R2", "R3"})
+        self.assertEqual(by["R1"]["text"], "baru")
+        self.assertEqual(by["R1"]["first_seen_at"], "2026-10-01T00:00:00+00:00")
+        self.assertTrue(by["R2"]["still_present"])
+        # Data lama sudah pernah di-scrape (punya scraped_at) -> hitungan menjadi 2.
+        self.assertEqual(p["scrape_count"], 2)
+
+    def test_scrape_lengkap_menandai_yang_hilang(self):
+        old = {"code": "P", "author": "a", "text": "x",
+               "scraped_at": "2026-10-01T00:00:00+00:00",
+               "replies": [{"code": "R1", "author": "b", "text": "lama"}]}
+        new = {"code": "P", "author": "a", "text": "x",
+               "scraped_at": "2026-10-02T00:00:00+00:00",
+               "complete": True, "truncated": False, "replies": []}
+        p = merge_post(old, new, new["scraped_at"])
+        self.assertFalse(p["replies"][0]["still_present"])
+
+
+class TestReplyTree(unittest.TestCase):
+    def test_depth_dan_parent_author(self):
+        replies = [
+            {"code": "R1", "author": "b", "parent_code": "P"},
+            {"code": "R2", "author": "c", "parent_code": "R1"},
+            {"code": "R3", "author": "d", "parent_code": None},
+        ]
+        build_reply_tree("P", "a", replies)
+        by = {r["code"]: r for r in replies}
+        self.assertEqual(by["R1"]["depth"], 1)
+        self.assertEqual(by["R1"]["reply_to_author"], "a")
+        self.assertEqual(by["R2"]["depth"], 2)
+        self.assertEqual(by["R2"]["reply_to_author"], "b")
+        self.assertEqual(by["R3"]["depth"], 1)
+        self.assertEqual(by["R3"]["root_code"], "P")
 
 
 class TestScrollCollect(unittest.TestCase):

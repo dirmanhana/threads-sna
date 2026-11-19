@@ -29,12 +29,47 @@ function Rich({ text, keyword, className = '' }) {
   return <span className={className} dangerouslySetInnerHTML={{ __html: hl(esc(text), keyword) }} />;
 }
 
+/* Urutkan komentar mengikuti pohon balasan; data lama tanpa kode tetap apa adanya. */
+function orderReplies(replies) {
+  const list = (replies || []).filter(Boolean);
+  if (!list.some((r) => r.code)) return list;
+  const byCode = new Map(list.filter((r) => r.code).map((r) => [r.code, r]));
+  const children = new Map();
+  const roots = [];
+  list.forEach((r) => {
+    const parent = r.parent_code;
+    if (parent && parent !== r.code && byCode.has(parent)) {
+      if (!children.has(parent)) children.set(parent, []);
+      children.get(parent).push(r);
+    } else {
+      roots.push(r);
+    }
+  });
+  const out = [];
+  const seen = new Set();
+  const walk = (r) => {
+    if (!r || seen.has(r)) return;
+    seen.add(r);
+    out.push(r);
+    (children.get(r.code) || []).forEach(walk);
+  };
+  roots.forEach(walk);
+  list.forEach(walk);          // jaring pengaman untuk siklus/orphan
+  return out;
+}
+
+function replyDepth(r) {
+  const n = Number(r && r.depth);
+  return Number.isFinite(n) && n > 0 ? n : 1;
+}
+
 /* ---------- kartu postingan (ringkas, bisa dibuka) ---------- */
 function PostCard({ p, only, posts, keyword }) {
   const [open, setOpen] = useState(false);
   const [limit, setLimit] = useState(10);
   const thread = (p.thread || []).filter((t) => !only || t.author === only);
   const replies = (p.replies || []).filter((r) => !only || r.author === only);
+  const ordered = orderReplies(replies);
   const total = thread.length + replies.length;
 
   return (
@@ -76,22 +111,34 @@ function PostCard({ p, only, posts, keyword }) {
               {t.timestamp && <span className="text-[11px] text-slate-500 dark:text-gray-400"> {t.timestamp}</span>}
             </div>
           ))}
-          {replies.slice(0, limit).map((r, i) => (
-            <div key={`r-${i}`} className="my-1.5 border-l-[3px] border-brand-500 pl-2 text-[12px] text-slate-600 dark:text-gray-400">
-              <span className="text-[11px] text-slate-500 dark:text-gray-400">komentar</span>{' '}
-              <b className="text-slate-800 dark:text-gray-100">
-                <UserLink id={r.author} posts={posts} url={itemUrl(r, p)} />
-              </b>:{' '}
-              <Rich text={r.text} keyword={keyword} />
-              {r.timestamp && <span className="text-[11px] text-slate-500 dark:text-gray-400"> {r.timestamp}</span>}
-            </div>
-          ))}
-          {replies.length > limit && (
+          {ordered.slice(0, limit).map((r, i) => {
+            const depth = replyDepth(r);
+            const indent = Math.min(depth - 1, 4) * 12;
+            return (
+              <div key={`r-${r.code || i}`}
+                style={indent ? { marginLeft: `${indent}px` } : undefined}
+                className={`my-1.5 border-l-[3px] pl-2 text-[12px] text-slate-600 dark:text-gray-400 ${depth > 1 ? 'border-slate-400 dark:border-gray-500' : 'border-brand-500'}`}>
+                <span className="text-[11px] text-slate-500 dark:text-gray-400">{depth > 1 ? 'balasan' : 'komentar'}</span>{' '}
+                {depth > 1 && r.reply_to_author && (
+                  <span className="text-[11px] text-slate-500 dark:text-gray-400">↳ @{r.reply_to_author} · </span>
+                )}
+                <b className="text-slate-800 dark:text-gray-100">
+                  <UserLink id={r.author} posts={posts} url={itemUrl(r, p)} />
+                </b>:{' '}
+                <Rich text={r.text} keyword={keyword} />
+                {r.timestamp && <span className="text-[11px] text-slate-500 dark:text-gray-400"> {r.timestamp}</span>}
+                {r.timestamp_source === 'estimated' && (
+                  <span className="text-[11px] italic text-slate-500 dark:text-gray-400"> (perkiraan)</span>
+                )}
+              </div>
+            );
+          })}
+          {ordered.length > limit && (
             <button
               className="mt-1 text-[11px] font-medium text-brand-600 hover:underline dark:text-brand-300"
               onClick={() => setLimit((l) => l + 20)}
             >
-              Muat {Math.min(20, replies.length - limit)} komentar lagi
+              Muat {Math.min(20, ordered.length - limit)} komentar lagi
             </button>
           )}
         </div>
@@ -239,6 +286,11 @@ function CommentsTab({ SNA, posts, keyword, q, setQ, limit, setLimit }) {
         <article key={`${c.postCode}-${i}`} className="mb-2 rounded-lg border border-slate-200 bg-slate-50 p-2 text-xs dark:border-gray-700 dark:bg-gray-800/60">
           <div className="flex flex-wrap items-baseline gap-x-1.5 gap-y-0.5">
             <b className="text-slate-800 dark:text-gray-100"><UserLink id={c.author} posts={posts} url={itemUrl(c, { code: c.postCode, author: c.postAuthor })} /></b>
+            {replyDepth(c) > 1 && (
+              <span className="text-[11px] text-slate-500 dark:text-gray-400">
+                balasan{c.reply_to_author ? ` ↳ @${c.reply_to_author}` : ''}
+              </span>
+            )}
             <span className="text-[11px] text-slate-500 dark:text-gray-400">di <UserLink id={c.postAuthor} posts={posts} url={c.postUrl} /></span>
             {c.timestamp && <span className="text-[11px] text-slate-500 dark:text-gray-400">· {c.timestamp}</span>}
           </div>

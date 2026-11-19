@@ -99,9 +99,20 @@ Checklist dari saran yang disetujui. Selesai semua pada sesi ini.
 - [x] Komponen `PostCard`/tab dipindah ke level modul agar state pagination dan lipatan tidak hilang saat parent re-render
 - [x] Verifikasi Playwright desktop 1440 px + ponsel 390 px: 32 pemeriksaan lulus (tab, pagination, lipat diskusi, pencarian, `?focus=`, bucket, replay, layar penuh, tanpa overflow/page error)
 
+## Scraping lanjutan (paket 1, 2, 4, 5)
+- [x] **Timestamp absolut**: `TimestampCollector` membaca `taken_at`/`created_at` dari respons JSON internal; fallback `<time datetime>`, tanggal/jam DOM, lalu waktu relatif bertanda `estimated`. Sumber disimpan di `timestamp_source` dan “(perkiraan)” ditampilkan di panel.
+- [x] **Gabung per komentar**: `merge_items`/`merge_post` mempertahankan komentar lama, memperbarui yang masih ada, dan menambah yang baru. `first_seen_at` stabil, `last_seen_at` diperbarui, `still_present` hanya `false` bila scrape baru lengkap.
+- [x] **Pohon balasan**: `build_reply_tree` mengisi `parent_code`, `depth`, `root_code`, `reply_to_author`; viewer mengurutkan akar → anak → cucu, memberi indentasi, dan label “balasan ↳ @akun”.
+- [x] **Keamanan API lokal**: `GET /api/session` memberi token acak per proses; semua `POST` wajib `X-SNA-Token`; `Host` non-loopback dan `Origin` lintas situs ditolak. Klien `api()` mengambil token otomatis dan retry sekali saat 401.
+- [x] `expected_replies`, `truncated`, `stop_reason`, dan `complete` menandai kelengkapan hasil scrape.
+- [x] Test baru: timestamp (network/DOM/estimasi), merge parsial vs lengkap, pohon balasan, token 401, dan origin 403.
+
 ## Verifikasi
-- `./run.sh test` → 26 test Python + 23 test Node lulus (termasuk 10 test API scraping dengan stub)
+- `./run.sh test` → 34 test Python + 23 test Node lulus (termasuk 12 test API scraping dengan stub)
 - Playwright: `/`, `/ringkasan.html`, `/index.html`, `/viewer.html`, `/sentimen.html`, `/scrape.html` tanpa page error; desktop 1440 px dan ponsel 390 px tanpa overflow horizontal
+- Playwright viewer data nyata: 32 pemeriksaan lulus (tab, pagination, lipat diskusi, pencarian, `?focus=`, bucket, replay, layar penuh)
+- Playwright fixture pohon balasan: urutan akar → anak → cucu, indentasi 12/24 px, label tujuan balasan, dan “(perkiraan)” tampil; 9 pemeriksaan lulus
+- Playwright token: POST dari browser mengirim `X-SNA-Token` yang cocok; tanpa token 401; origin asing 403
 - Pencarian global “anabel” → klik hasil → `/viewer.html?focus=anabelpolitik` dan panel akun langsung terbuka
 - Tema gelap/terang, sidebar 80 ↔ 256 px, dan donut/bar chart terverifikasi lewat DOM
 - Audit kontras halaman Ringkasan: 0 teks di bawah ambang WCAG AA pada mode terang
@@ -112,5 +123,6 @@ Checklist dari saran yang disetujui. Selesai semua pada sesi ini.
 - Uji browser headless laporan: SVG mengandung judul/legenda/statistik/aktor teratas; PNG laporan 6000 px tanpa page error
 
 ## Catatan
-- `parent_code` diisi best-effort dari quote-reply; balasan bersarang belum sepenuhnya dibedakan.
+- `parent_code` diisi best-effort dari struktur DOM/quote-reply; balasan yang tidak pernah dirender (mis. tersembunyi di balik “Lihat balasan” yang gagal diklik) tetap tidak terbaca.
 - Data lama yang belum punya `timestamp` tidak ikut tersaring saat filter tanggal aktif.
+- Token API adalah pengaman tambahan untuk API lokal, bukan pengganti bind `127.0.0.1`.

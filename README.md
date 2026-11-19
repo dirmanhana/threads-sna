@@ -44,7 +44,7 @@ Untuk fitur analisis konten berbasis LLM, salin `.env.example` menjadi `.env` la
 
 Opsi lanjutan lewat `scrape_threads.py` langsung: `--out`, `--delay` (jeda dasar antar postingan, detik), `--max-replies`, `--profile-dir`, `--show`. Lewat `run.sh` bisa diatur dengan env: `OUT=nama.json DELAY=5 PROFILE_DIR=./akun_lain ./run.sh keyword "umkm"`.
 
-Hasil disimpan ke `data.json` dan **digabung** dengan data lama (berdasarkan kode postingan). URL yang gagal dicatat ke `failed.json`. Jika semua postingan gagal dibaca, file hasil tidak ditimpa dan akan muncul peringatan kemungkinan sesi login kedaluwarsa.
+Hasil disimpan ke `data.json` dan **digabung** dengan data lama (berdasarkan kode postingan). Saat opsi gabung aktif, komentar yang sudah ada tidak dibuang walaupun tidak terlihat lagi pada scrape baru; item seperti itu hanya ditandai `still_present: false` bila scrape baru benar-benar lengkap. URL yang gagal dicatat ke `failed.json`. Jika semua postingan gagal dibaca, file hasil tidak ditimpa dan akan muncul peringatan kemungkinan sesi login kedaluwarsa.
 
 ### Pengumpulan data dari browser (tanpa terminal)
 
@@ -59,24 +59,39 @@ Catatan: scraper tetap memakai Playwright sungguhan, jadi **login pertama memerl
 
 API yang dipakai halaman ini: `GET /api/scrape/status`, `POST /api/scrape/start`, `/api/scrape/cancel`, `GET /api/login/status`, `POST /api/login/start`, `/api/login/confirm`, `/api/login/cancel`. `scrape_progress.json`, `login_progress.json`, dan `login_selesai.marker` adalah file sementara (gitignored) dan diblokir dari akses statis.
 
+**Keamanan API lokal:** semua `POST` wajib membawa header `X-SNA-Token` yang diberikan `GET /api/session` saat halaman dimuat; browser mengambilnya otomatis. Server juga menolak `Host` non-loopback (anti DNS rebinding) dan `Origin` lintas situs (anti CSRF). Token dibuat acak setiap server dijalankan dan tidak pernah ditulis ke disk atau dikirim ke layanan lain. Ini lapisan tambahan, bukan pengganti aturan tetap: server hanya boleh di-bind ke `127.0.0.1`.
+
 ## Schema `data.json`
 
 ```json
 {
+  "schema_version": 2,
+  "generated_at": "2026-10-07T12:00:00+00:00",
   "posts": [{
     "code": "XXXX", "url": "...", "author": "akun",
     "text": "isi postingan + gabungan thread",
-    "timestamp": "2026-10-07", "likes": 123,
+    "timestamp": "2026-10-07T12:34:56+00:00", "timestamp_source": "network",
+    "likes": 123,
     "thread":  [{"code": "...", "author": "akun", "text": "...", "timestamp": "...", "likes": null, "parent_code": null}],
-    "replies": [{"code": "...", "author": "komentator", "text": "...", "timestamp": "...", "likes": null, "parent_code": null}],
-    "scraped_at": "2026-10-07T12:00:00+00:00"
+    "replies": [{
+      "code": "...", "author": "komentator", "text": "...",
+      "timestamp": "...", "timestamp_source": "dom", "likes": null,
+      "parent_code": "...", "root_code": "XXXX", "depth": 2, "reply_to_author": "akun_lain",
+      "first_seen_at": "...", "last_seen_at": "...", "still_present": true
+    }],
+    "expected_replies": 12, "truncated": false, "stop_reason": "stall",
+    "scraped_at": "2026-10-07T12:00:00+00:00",
+    "first_scraped_at": "...", "last_scraped_at": "...", "scrape_count": 1
   }]
 }
 ```
 
 - `thread` = lanjutan thread oleh **penulis postingan**. Tidak dibuatkan edge graf; teksnya digabung ke `post.text`.
-- `replies` = komentar dari akun lain. Field baru (`timestamp`, `likes`, `parent_code`) boleh `null`; viewer tetap bisa membaca data lama.
-- `parent_code` diisi best-effort dari cuplikan quote-reply; balasan bersarang belum sepenuhnya dibedakan.
+- `replies` = komentar dari akun lain. Field baru boleh `null`; viewer tetap bisa membaca data lama.
+- **Timestamp** diambil berurutan dari: respons JSON internal Threads (`timestamp_source: "network"`), `<time datetime>` (`dom`/`date`), tanggal atau tanggal+jam di DOM, lalu waktu relatif seperti “2 j” yang ditandai `estimated` dan ditampilkan sebagai “(perkiraan)” di panel. Data lama yang hanya punya tanggal tetap bertanda `date`.
+- **Pohon balasan**: `parent_code` menunjuk komentar induk, `root_code` postingan/akar, `depth` kedalaman (1 = komentar langsung), dan `reply_to_author` akun yang dibalas. Viewer mengurutkan akar → anak → cucu dan memberi indentasi; data lama tanpa field ini tetap tampil sebagai komentar biasa.
+- **Gabung per komentar**: `merge_post` mempertahankan komentar lama, memperbarui yang masih terlihat, dan menambahkan yang baru. `first_seen_at` tidak berubah; `last_seen_at` diperbarui. `still_present` hanya menjadi `false` bila scrape baru lengkap (`complete: true`).
+- `expected_replies` berasal dari teks “Lihat N balasan”; `truncated`/`stop_reason` menandai hasil yang terpotong batas atau berhenti karena halaman tidak menambah item.
 
 Data lama (sebelum schema ini) bisa dimigrasi dengan `./run.sh migrate`. Backup otomatis disimpan ke `data.json.bak`. Migrasi memisahkan thread dari komentar, membuang tanggal/`rb tayangan` dari teks, dan mengisi field baru. Aman diulang.
 

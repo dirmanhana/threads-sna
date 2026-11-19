@@ -13,9 +13,37 @@ export async function getJson(url) {
   }
 }
 
-export async function api(path, options) {
+let apiToken = null;
+
+async function loadToken(force = false) {
+  if (apiToken && !force) return apiToken;
   try {
-    const r = await fetch(path, options);
+    const r = await fetch('/api/session', { cache: 'no-store' });
+    if (!r.ok) return null;
+    const data = await r.json();
+    apiToken = data?.token || null;
+  } catch {
+    apiToken = null;
+  }
+  return apiToken;
+}
+
+export async function api(path, options = {}) {
+  const opts = { ...options };
+  const method = String(opts.method || 'GET').toUpperCase();
+  if (method !== 'GET') {
+    const token = await loadToken();
+    if (token) opts.headers = { ...(opts.headers || {}), 'X-SNA-Token': token };
+  }
+  try {
+    let r = await fetch(path, opts);
+    if (r.status === 401 && method !== 'GET') {
+      const token = await loadToken(true);
+      if (token) {
+        opts.headers = { ...(opts.headers || {}), 'X-SNA-Token': token };
+        r = await fetch(path, opts);
+      }
+    }
     let data = null;
     try { data = await r.json(); } catch { /* bukan JSON */ }
     return { ok: r.ok, status: r.status, data };

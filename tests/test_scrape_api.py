@@ -177,10 +177,17 @@ class ApiTest(unittest.TestCase):
             time.sleep(0.1)
         self.fail("login tidak selesai dalam batas waktu")
 
-    def post(self, path, body=None):
+    def post(self, path, body=None, token=True, origin=None):
         data = json.dumps(body or {}).encode("utf-8")
+        headers = {"Content-Type": "application/json"}
+        if token:
+            if not getattr(self, "_token", None):
+                self._token = self.get_json("/api/session")["token"]
+            headers["X-SNA-Token"] = self._token
+        if origin:
+            headers["Origin"] = origin
         req = urllib.request.Request(self.base + path, data=data,
-                                     headers={"Content-Type": "application/json"}, method="POST")
+                                     headers=headers, method="POST")
         try:
             with urllib.request.urlopen(req, timeout=5) as r:
                 return r.status, json.loads(r.read().decode("utf-8"))
@@ -211,6 +218,14 @@ class ApiTest(unittest.TestCase):
         code, login = self.get("/api/login/status")
         self.assertEqual(code, 200)
         self.assertIn("active", login)
+
+    def test_api_wajib_token_dan_origin(self):
+        code, res = self.post("/api/scrape/cancel", token=False)
+        self.assertEqual(code, 401, res)
+        code, res = self.post("/api/scrape/cancel", origin="http://evil.example")
+        self.assertEqual(code, 403, res)
+        code, res = self.post("/api/scrape/cancel", origin=self.base)
+        self.assertEqual(code, 200, res)
 
     def test_validasi_ditolak(self):
         code, res = self.post("/api/scrape/start", {"mode": "hapus", "target": "x"})
