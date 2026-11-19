@@ -69,6 +69,7 @@ Checklist dari saran yang disetujui. Selesai semua pada sesi ini.
 - [x] `llm_server.py` menyajikan `dist/` dan memetakan `/viewer.html` + `/sentimen.html` ke SPA; fallback ke HTML lama sebelum build; `.env` tetap diblokir
 - [x] `run.sh build`, auto-build saat `serve` pertama, `.gitignore` untuk `node_modules/` & `dist/`, `LICENSE` GPL-3.0 + atribusi Mosaic Lite
 - [x] Verifikasi browser (Playwright) kedua halaman dengan data nyata: 790 node/854 relasi, 819 komentar berlabel, tanpa page error; filter, fokus/isolasi, anomali, replay, ekspor, dark mode berfungsi
+- [x] `install.sh` diperbarui menjadi installer end-to-end (7 tahap): prasyarat Python/Node 20+/npm, venv + requirements, Chromium (+ `WITH_DEPS`), dependensi npm, build `dist/`, template `.env` tanpa menimpa, dan verifikasi test; opsi `SKIP_BROWSER`/`SKIP_BUILD`/`SKIP_TESTS`
 - [x] Pisahkan error parse JSON vs error render di banner viewer; beri petunjuk `./run.sh serve` kalau `fetch` diblokir
 - [x] Tambah test regresi mention-only node (13 test Node)
 

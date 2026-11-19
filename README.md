@@ -8,14 +8,19 @@ Ambil postingan dan komentar dari Threads dengan Playwright, lalu lihat jaringan
 chmod +x install.sh && ./install.sh
 ```
 
-Membuat `.venv`, meng-install Playwright dan Chromium. Jika Chromium gagal jalan di Linux karena library sistem: `WITH_DEPS=1 ./install.sh` (butuh sudo).
+Satu perintah ini menyiapkan **semua tahapan**:
 
-Tampilan dashboard (React + Tailwind) memerlukan Node 20+:
+1. Cek prasyarat: Python 3, **Node.js 20+**, dan npm.
+2. Buat `.venv` lalu install paket dari `requirements.txt` (Playwright).
+3. Install browser Chromium untuk Playwright.
+4. Install dependensi Node (`npm ci` bila `package-lock.json` ada, sebaliknya `npm install`).
+5. Build dashboard React + Tailwind ke `dist/` (`npm run build`).
+6. Buat `.env` dari `.env.example` bila belum ada (tidak pernah menimpa kredensial yang sudah diisi).
+7. Verifikasi dengan unit test Python + Node.
 
-```bash
-npm install                 # sekali saja; mengundang React, D3, Vite, Tailwind
-./run.sh build              # build ke dist/ (otomatis saat serve pertama kali)
-```
+Opsi environment: `WITH_DEPS=1` (library sistem Chromium, butuh sudo di Linux), `SKIP_BROWSER=1`, `SKIP_BUILD=1`, `SKIP_TESTS=1`, dan `PYTHON=python3.12` untuk memilih interpreter.
+
+Kalau ingin install manual per bagian: `python -m venv .venv && pip install -r requirements.txt && playwright install chromium`, lalu `npm install && npm run build`. `./run.sh serve` juga otomatis build bila `dist/` belum ada.
 
 Untuk fitur analisis konten berbasis LLM, salin `.env.example` menjadi `.env` lalu isi kredensial. File `.env` **tidak pernah dikirim ke browser** dan sudah masuk `.gitignore`. Skrip analisis memakai `urllib` standar Python (tanpa dependency tambahan).
 
