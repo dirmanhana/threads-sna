@@ -6,6 +6,7 @@
 #   ./run.sh post <url_postingan> [max_komentar]
 #   ./run.sh serve [port]                           # viewer di http://localhost:8000/viewer.html
 #   ./run.sh migrate                                # migrasi data.json lama ke schema baru
+#   ./run.sh analyze [opsi]                         # analisis konten via LLM (.env -> llm_analysis.json)
 #   ./run.sh test                                   # jalankan unit test
 # Variabel lingkungan: OUT=..., DELAY=..., PROFILE_DIR=...
 set -euo pipefail
@@ -25,8 +26,9 @@ case "$cmd" in
   post)    scrape post "${1:?url belum diisi}" --max-replies "${2:-400}" ;;
   serve)   port="${1:-8000}"; echo "Buka http://localhost:$port/viewer.html"; python -m http.server "$port" ;;
   migrate) python migrate_data.py --src "$OUT" ;;
+  analyze) python llm_analyze.py "$@" ;;
   test)
-    python -m unittest discover -s tests -p 'test_core.py'
+    python -m unittest discover -s tests -p 'test_*.py'
     if command -v node >/dev/null 2>&1; then node --test tests/test_viewer.mjs; else echo "node tidak ada; lewati test viewer."; fi
     ;;
   *) sed -n '2,10p' "$0"; exit 1 ;;

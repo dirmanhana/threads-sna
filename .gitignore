@@ -6,4 +6,8 @@ __pycache__/
 data.json
 data.json.bak
 failed.json
+.env
+.env.*
+!.env.example
+llm_analysis.json
 .DS_Store

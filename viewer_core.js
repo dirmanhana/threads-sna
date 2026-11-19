@@ -430,6 +430,20 @@
     return [...new Set(normText(v).split(' ').filter(Boolean))].sort(cmp);
   }
   const tokenKey = v => textTokens(v).join(' ');
+
+  /* Kunci komentar yang sama persis dengan content_key() di llm_analyze.py.
+   * FNV-1a 64-bit (dua seed) bisa dihitung sinkron di browser. */
+  function fnv1a(s, seed) {
+    const bytes = new TextEncoder().encode(s);
+    let h = seed >>> 0;
+    for (let i = 0; i < bytes.length; i++) { h ^= bytes[i]; h = Math.imul(h, 0x01000193) >>> 0; }
+    return h;
+  }
+  function contentKey(author, post, text) {
+    const raw = str(author).trim().toLowerCase() + '|' + str(post).trim() + '|' + normText(text);
+    return fnv1a(raw, 0x811C9DC5).toString(16).padStart(8, '0')
+         + fnv1a(raw, 0x9E3779B9).toString(16).padStart(8, '0');
+  }
   function jaccard(a, b) {
     let i = 0, j = 0, inter = 0;
     while (i < a.length && j < b.length) {
@@ -657,6 +671,6 @@
   return {
     build, analyze, louvain, betweenness, closeness, eigenvector, degree,
     parseDate, normalizeGraph, communitySizes, eid,
-    normText, textTokens, tokenKey, detectCIB, temporalBuckets, bucketEvents, buzzerScores
+    normText, textTokens, tokenKey, contentKey, detectCIB, temporalBuckets, bucketEvents, buzzerScores
   };
 });

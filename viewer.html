@@ -51,6 +51,10 @@ body.fs #tl{display:none}
 .risk.tinggi{background:#8a2b1d}.risk.sedang{background:#966200}.risk.rendah{background:var(--mut)}
 .ano{border-left:3px solid var(--c2);padding-left:8px;margin:6px 0}
 .disc{font-size:11px;color:var(--mut);font-style:italic}
+.wc{display:flex;flex-wrap:wrap;gap:2px 9px;align-items:baseline;margin:6px 0 10px}
+.wc span{line-height:1.15}
+.sent{font-weight:700}.sent.positif{color:var(--c3)}.sent.negatif{color:var(--c2)}.sent.netral{color:var(--mut)}
+.ng{display:inline-block;background:var(--card);border-radius:6px;padding:2px 6px;margin:2px;font-size:11px}
 details.exp{position:relative}
 details.exp .menu{position:absolute;right:0;top:100%;z-index:20;background:var(--card);border:1px solid var(--bd);border-radius:8px;padding:8px;display:flex;flex-direction:column;gap:6px;min-width:132px;box-shadow:0 4px 16px #0003}
 </style></head><body>
@@ -60,7 +64,8 @@ details.exp .menu{position:absolute;right:0;top:100%;z-index:20;background:var(-
 <button id="rs">Reset pilihan</button>
 <button id="rz">Reset zoom</button>
 <button id="fs" title="Tampilkan peta jaringan saja">Layar penuh</button>
-<select id="colorBy" title="Warna node"><option value="peran">Warna: Peran</option><option value="komunitas">Warna: Komunitas</option></select>
+<select id="colorBy" title="Warna node"><option value="peran">Warna: Peran</option><option value="komunitas">Warna: Komunitas</option><option value="sentimen">Warna: Sentimen</option></select>
+<select id="edgeColorBy" title="Warna edge"><option value="jenis">Edge: Jenis</option><option value="sentimen">Edge: Sentimen</option></select>
 <span class="lg"><i style="background:var(--c1)"></i>komentar<i style="background:var(--c2)"></i>mention<i style="background:var(--c4)"></i>co-comment</span>
 <details class="exp"><summary>Ekspor</summary><div class="menu">
   <button id="exNode">CSV node</button><button id="exEdge">CSV edge</button>
@@ -82,6 +87,9 @@ details.exp .menu{position:absolute;right:0;top:100%;z-index:20;background:var(-
 <select id="speed" title="Kecepatan putar"><option value="1">1×</option><option value="5" selected>5×</option><option value="20">20×</option></select></label>
 <span id="replayInfo">0 / 0 peristiwa</span>
 <button id="anomBtn" title="Deteksi komentar terkoordinasi & skor buzzer">🚨 Anomali</button>
+<button id="contentBtn" title="Analisis konten & sentimen via LLM">📊 Konten</button>
+<label>sentimen <select id="sentFilter"><option value="">semua</option><option value="positif">positif</option><option value="negatif">negatif</option><option value="netral">netral</option></select></label>
+<label><input id="hideToxic" type="checkbox"> sembunyikan toksik/spam</label>
 </div>
 <main><svg id="svg"></svg><aside id="pn"></aside></main>
 <div id="tl">
@@ -115,6 +123,7 @@ const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;'
 const eid=v=>v&&typeof v==='object'?String(v.id==null?'':v.id):String(v==null?'':v);
 const fmt=v=>Number(v||0).toFixed(3);
 const cmp=(a,b)=>a<b?-1:a>b?1:0;
+const contentKey=SNA.contentKey;
 const BASE_URL='https://www.threads.com';
 const safeUrl=u=>{try{const x=new URL(String(u||''),location.href);
   return (x.protocol==='http:'||x.protocol==='https:')?x.href:null}catch(e){return null}};
@@ -147,6 +156,8 @@ const replay={events:[],i:0,playing:false,timer:null};
 let anomaly={cib:{clusters:[],hasTime:false,total:0},temporal:{buckets:[],bursts:[],total:0,stepMs:86400000},scores:[],byId:new Map()};
 const anonOpts={windowMs:10*60000,minAccounts:3};
 let tlGran='auto',riskHighlight=false,selectedBucket=null;
+const llm={ready:false,comments:new Map(),topics:[],keywords:[],counts:{},entries:[]};
+let edgeColorBy='jenis',sentFilter='',hideToxic=false;
 
 function showWarn(msg){const w=$('#warn');w.textContent=msg;w.hidden=false}
 function hideWarn(){$('#warn').hidden=true}
@@ -175,13 +186,13 @@ function renderGraph(g,withMetrics=true){
 function load(d){
   stopReplay(true);replay.events=[];replay.i=0;
   all=Array.isArray(d)?d:(d&&Array.isArray(d.posts)?d.posts:[]);
-  buildActorList();apply();
+  reindexLlm();buildActorList();apply();
   replay.events=buildEvents();updateReplayUI();
 }
 function apply(){
   if(replay.playing)stopReplay(true);   // filter apa pun menghentikan replay
   const k=kw.trim().toLowerCase(),has=t=>String(t==null?'':t).toLowerCase().includes(k);
-  posts=!k?all:all.map(p=>{
+  const base=!k?all:all.map(p=>{
     if(has(p.text)||has(p.author))return p;
     const rs=(p.replies||[]).filter(r=>has(r.text)||has(r.author));
     if(rs.length)return {...p,replies:rs};
@@ -189,6 +200,7 @@ function apply(){
     if(th.length)return {...p,thread:th};
     return null;
   }).filter(Boolean);
+  posts=filterByContent(base);
   renderGraph(SNA.build(posts,state),true);
   computeAnomaly();renderTimeline();
   panel();header();
@@ -205,6 +217,49 @@ function computeAnomaly(){
   }catch(err){showWarn('Gagal menghitung anomali: '+(err&&err.message||err))}
 }
 const riskOf=id=>{const s=anomaly.byId.get(id);return s?s.score:0};
+
+/* ---------- analisis konten dari LLM (llm_analysis.json) ---------- */
+function reindexLlm(){
+  llm.entries=[];
+  (all||[]).forEach(p=>{
+    const code=p.code||'';
+    (p.replies||[]).forEach(r=>{
+      const a=llm.comments.get(contentKey(r.author,code,r.text));
+      if(a)llm.entries.push({...a,author:r.author,post:code,text:r.text,timestamp:r.timestamp});
+    });
+  });
+}
+const analysisFor=it=>it&&llm.comments.get(contentKey(it.author,it.postCode,it.text));
+function tallyEntries(es){
+  const t={positif:0,negatif:0,netral:0,toxic:0,spam:0,n:0,toxSum:0,emotions:new Map(),topics:new Map()};
+  es.forEach(e=>{
+    t.n++;t[e.sentiment]=(t[e.sentiment]||0)+1;
+    const tox=Number(e.toxicity)||0;t.toxSum+=tox;if(tox>=0.6)t.toxic++;
+    if(e.spam)t.spam++;
+    t.emotions.set(e.emotion,(t.emotions.get(e.emotion)||0)+1);
+    if(e.topic!=null)t.topics.set(e.topic,(t.topics.get(e.topic)||0)+1);
+  });
+  t.avgTox=t.n?Math.round(t.toxSum/t.n*100)/100:0;
+  return t;
+}
+const nodeSentiment=id=>tallyEntries(llm.entries.filter(e=>e.author===id));
+function edgeSentiment(l){
+  const its=(l.items||[]).map(analysisFor).filter(Boolean);
+  if(!its.length)return null;
+  const t=tallyEntries(its),net=t.positif-t.negatif;
+  return {kind:net>0?'positif':net<0?'negatif':'netral',...t};
+}
+const sentColor=k=>k==='positif'?'var(--c3)':k==='negatif'?'var(--c2)':'var(--mut)';
+function filterByContent(src){
+  if(!llm.ready||(!sentFilter&&!hideToxic))return src;
+  return src.map(p=>({...p,replies:(p.replies||[]).filter(r=>{
+    const a=analysisFor({author:r.author,postCode:p.code,text:r.text});
+    if(!a)return true;
+    if(hideToxic&&((Number(a.toxicity)||0)>=0.7||a.spam))return false;
+    if(sentFilter&&a.sentiment!==sentFilter)return false;
+    return true;
+  })}));
+}
 function tlLabel(t,step,short){
   const d=new Date(t);
   if(step===86400000)return d.toLocaleDateString('id-ID',Object.assign({day:'2-digit',month:'short',timeZone:'UTC'},short?{}:{year:'numeric'}));
@@ -436,14 +491,22 @@ function hideTip(){$('#tip').hidden=true}
 function showNodeTip(e,d){
   const m=metrics||{communities:new Map(),betweenness:new Map(),closeness:new Map(),eigenvector:new Map()};
   const c=m.communities.get(d.id),sc=anomaly.byId.get(d.id);
+  const st=llm.ready?nodeSentiment(d.id):null;
   showTip('<b>@'+esc(d.id)+'</b><br>'+
     'Derajat: '+(d.deg||0)+' · Post: '+(d.posts||0)+' · Komentar: '+(d.replies||0)+' · Thread: '+(d.threadCount||0)+'<br>'+
     'Komunitas: '+(c==null?'-':c)+'<br>'+
     'Betweenness: '+fmt(m.betweenness.get(d.id))+' · Closeness: '+fmt(m.closeness.get(d.id))+' · Eigenvector: '+fmt(m.eigenvector.get(d.id))
-    +(sc?'<br>Skor buzzer: <b>'+sc.score+'</b> ('+esc(sc.level)+')':''),e);
+    +(sc?'<br>Skor buzzer: <b>'+sc.score+'</b> ('+esc(sc.level)+')':'')
+    +(st&&st.n?'<br>Sentimen: <span class="sent '+(st.positif>st.negatif?'positif':st.negatif>st.positif?'negatif':'netral')
+      +'">'+(st.positif>st.negatif?'positif':st.negatif>st.positif?'negatif':'netral')+'</span> ('
+      +st.positif+'+/'+st.negatif+'-/'+st.netral+' netral)':''),e);
 }
 
 function colorOf(n){
+  if(colorBy==='sentimen'&&llm.ready){
+    const t=nodeSentiment(n.id);
+    if(t.n)return sentColor(t.positif>t.negatif?'positif':t.negatif>t.positif?'negatif':'netral');
+  }
   if(colorBy==='komunitas'&&metrics){
     const c=metrics.communities.get(n.id);
     const sc=d3.schemeTableau10||d3.schemeCategory10;
@@ -454,7 +517,13 @@ function colorOf(n){
 function draw(g){
   const svg=d3.select('#svg');svg.selectAll('*').remove();if(sim)sim.stop();hideTip();
   const node=svg.node(),W=node.clientWidth||800,H=node.clientHeight||600;
-  const col=t=>t==='mention'?'var(--c2)':t==='co-comment'?'var(--c4)':'var(--c1)';
+  const col=(t,l)=>{
+    if(edgeColorBy==='sentimen'&&llm.ready){
+      const s=edgeSentiment(l);
+      if(s)return sentColor(s.kind);
+    }
+    return t==='mention'?'var(--c2)':t==='co-comment'?'var(--c4)':'var(--c1)';
+  };
   svg.append('defs').append('marker').attr('id','ar').attr('viewBox','0 -4 8 8').attr('refX',18)
     .attr('markerWidth',6).attr('markerHeight',6).attr('orient','auto')
     .append('path').attr('d','M0,-4L8,0L0,4Z').attr('fill','context-stroke');
@@ -472,11 +541,15 @@ function draw(g){
   const r=d=>6+Math.sqrt(d.deg||0)*3.5;
 
   const lk=root.append('g').attr('class','lnk').selectAll('line').data(g.links).join('line')
-    .attr('stroke',d=>col(d.type)).attr('stroke-opacity',lop)
+    .attr('stroke',d=>col(d.type,d)).attr('stroke-opacity',lop)
     .attr('stroke-width',d=>1+Math.min(Number(d.w)||1,8))
     .attr('marker-end','url(#ar)').style('cursor','pointer')
     .on('click',(e,d)=>{e.stopPropagation();panelUser=null;panel({link:d})})
-    .on('mousemove',(e,d)=>showTip('@'+esc(eid(d.source))+' → @'+esc(eid(d.target))+' ('+esc(d.type)+', '+(d.w||0)+'×)',e))
+    .on('mousemove',(e,d)=>{
+      const s=edgeColorBy==='sentimen'?edgeSentiment(d):null;
+      showTip('@'+esc(eid(d.source))+' → @'+esc(eid(d.target))+' ('+esc(d.type)+', '+(d.w||0)+'×)'
+        +(s?'<br>Sentimen: <span class="sent '+s.kind+'">'+s.kind+'</span> ('+s.positif+'+/'+s.negatif+'-/'+s.netral+' netral)':''),e)
+    })
     .on('mouseout',hideTip);
 
   const nd=root.append('g').selectAll('g').data(g.nodes).join('g').style('cursor','pointer')
@@ -543,6 +616,78 @@ function communityBlock(){
   return '<h4>Komunitas</h4><div class="tag">'+sizes.size+' komunitas</div>'+
     top.slice(0,5).map(([k,v])=>'<div class="tag">Komunitas '+k+': '+v+' akun</div>').join('');
 }
+/* ---------- panel analisis konten (LLM) ---------- */
+function contentEntries(scope){
+  if(scope&&scope.user)return llm.entries.filter(e=>e.author===scope.user);
+  if(scope&&scope.community!=null){
+    const ids=new Set([...((metrics&&metrics.communities)||new Map()).entries()]
+      .filter(([,c])=>c===scope.community).map(([id])=>id));
+    return llm.entries.filter(e=>ids.has(e.author));
+  }
+  return llm.entries;
+}
+function keywordWeights(entries){
+  const w=new Map();
+  entries.forEach(e=>{
+    const tp=llm.topics.find(t=>t.id===e.topic);
+    if(!tp)return;
+    (tp.keywords||[]).forEach(k=>w.set(k,(w.get(k)||0)+1));
+  });
+  return [...w.entries()].sort((a,b)=>b[1]-a[1]||cmp(a[0],b[0]));
+}
+function wordCloudHtml(entries){
+  const ws=keywordWeights(entries);
+  if(!ws.length)return '<div class="tag">Belum ada kata kunci dari LLM.</div>';
+  const max=ws[0][1]||1;
+  return '<div class="wc">'+ws.slice(0,24).map(([term,n])=>{
+    const size=11+Math.round(16*n/max);
+    return '<span style="font-size:'+size+'px" title="'+esc(term)+' · '+n+' komentar">'+esc(term)+'</span>';
+  }).join('')+'</div>';
+}
+function contentBlock(scope,title){
+  if(!llm.ready)return '<h4>Analisis konten</h4><div class="tag">Belum tersedia. Jalankan '
+    +'<code>.venv/bin/python llm_analyze.py</code>.</div>';
+  const es=contentEntries(scope),t=tallyEntries(es);
+  const byTopic=[...t.topics.entries()].sort((a,b)=>b[1]-a[1]||a[0]-b[0]).slice(0,6).map(([id,n])=>{
+    const tp=llm.topics.find(x=>x.id===id);
+    return '<div class="tag">'+(tp?esc(tp.label):'Topik '+id)+' · '+n+' komentar'
+      +(tp&&tp.keywords.length?' <span class="tag">'+esc(tp.keywords.slice(0,5).join(', '))+'</span>':'')+'</div>';
+  }).join('')||'<div class="tag">-</div>';
+  const emo=[...t.emotions.entries()].sort((a,b)=>b[1]-a[1]).slice(0,6)
+    .map(([k,n])=>esc(k)+' '+n).join(' · ')||'-';
+  const ws=keywordWeights(es).slice(0,12);
+  return '<h4>'+esc(title)+'</h4><div class="tag">'+t.n+' komentar · '
+    +'<span class="sent positif">'+t.positif+' positif</span> · '
+    +'<span class="sent negatif">'+t.negatif+' negatif</span> · '
+    +'<span class="sent netral">'+t.netral+' netral</span><br>'
+    +'toksik '+t.toxic+' · spam '+t.spam+' · rata-rata toksisitas '+t.avgTox+'</div>'
+    +'<h4>Emosi</h4><div class="tag">'+emo+'</div>'
+    +'<h4>Topik (LLM)</h4>'+byTopic
+    +'<h4>Word cloud</h4>'+wordCloudHtml(es)
+    +'<h4>Top n-gram</h4>'+(ws.map(([k,n])=>'<span class="ng">'+esc(k)+' · '+n+'</span>').join('')||'<div class="tag">-</div>');
+}
+function contentPanel(){
+  const el=$('#pn');if(!el)return;
+  if(!llm.ready){
+    el.innerHTML='<h4>📊 Analisis konten (LLM)</h4>'
+      +'<div class="tag">Hasil analisis belum tersedia.</div>'
+      +'<div class="card">Jalankan <code>.venv/bin/python llm_analyze.py</code> lalu muat ulang viewer. Kredensial dibaca dari <code>.env</code>.</div>'
+      +'<div class="acts"><button id="cClose">Tutup</button></div>';
+    const c=$('#cClose');if(c)c.onclick=()=>panel();return;
+  }
+  const toxic=[...llm.entries].filter(e=>(Number(e.toxicity)||0)>=0.6||e.spam)
+    .sort((a,b)=>(Number(b.toxicity)||0)-(Number(a.toxicity)||0)).slice(0,8);
+  el.innerHTML='<h4>📊 Analisis konten (LLM)</h4>'
+    +'<div class="disc">Dihasilkan oleh '+esc(llm.counts.model||'LLM')+' pada '
+      +esc(llm.counts.generated_at||'-')+' · '+llm.entries.length+' komentar berlabel.</div>'
+    +'<div class="acts"><button id="cClose">Tutup</button></div>'
+    +contentBlock(null,'Ringkasan seluruh data')
+    +(toxic.length?'<h4>Komentar perlu ditinjau</h4>'+toxic.map(e=>
+      '<div class="card"><div>'+hl(e.text)+'</div><div class="tag">'+userLink(e.author)
+      +' · toksisitas '+e.toxicity+(e.spam?' · spam':'')+'</div></div>').join(''):'');
+  const c=$('#cClose');if(c)c.onclick=()=>panel();
+}
+
 function bindPanel(){
   const f=$('#pFocus'),u=$('#pUnfocus'),i=$('#pIso'),o=$('#pOpen');
   if(f)f.onclick=()=>{if(panelUser){focus=panelUser;isolate=false;setActor(focus);redraw();panel({user:focus})}};
@@ -555,7 +700,9 @@ function panel(o={}){
   if(o.link){
     const l=o.link,items=(l.items&&l.items.length?l.items:[{}]);
     panelUser=null;
+    const ls=edgeColorBy==='sentimen'?edgeSentiment(l):null;
     el.innerHTML='<h4>'+userLink(eid(l.source))+' → '+userLink(eid(l.target))+' <span class="tag">'+esc(l.type)+', '+(l.w||0)+'×</span></h4>'+
+      (ls?'<div class="tag">Sentimen edge: <span class="sent '+ls.kind+'">'+ls.kind+'</span> ('+ls.positif+'+/'+ls.negatif+'-)</div>':'')+
       items.map(it=>'<div class="card"><div>'+hl(it.text)+'</div><div class="tag">'+
         linkUser(it.author,'@'+it.author,itemUrl(it,{code:it.postCode,author:it.author}))+
         ' · '+esc(it.postCode)+(it.timestamp?' · '+esc(it.timestamp):'')+'</div></div>').join('');
@@ -573,6 +720,8 @@ function panel(o={}){
       '<div class="acts"><button id="pFocus">Fokus</button><button id="pUnfocus">Lepaskan fokus</button>'+
       '<button id="pIso">'+(isolate?'Tampilkan semua':'Isolasi')+'</button>'+
       '<button id="pOpen">Buka di Threads ↗</button></div>'+
+      contentBlock({user:u},'Konten @'+u)
+      +(colorBy==='komunitas'&&c!=null?contentBlock({community:c},'Konten komunitas '+c):'')+
       (mine.length?'<h4>Postingan</h4>'+mine.map(p=>postCard(p)).join(''):'')+
       (other.length?'<h4>Dikomentari</h4>'+other.map(p=>postCard(p,u)).join(''):'');
     bindPanel();return;
@@ -583,9 +732,11 @@ function panel(o={}){
   el.innerHTML=metricTable()+actorTop()+communityBlock()+
     '<h4>Anomali & buzzer</h4><div class="tag">'+c.clusters.length+' klaster CIB · '+t.bursts.length
       +' lonjakan · '+hi+' akun risiko tinggi</div>'
-    +'<div class="acts"><button id="mAnom">Lihat detail deteksi</button></div>'
+    +'<div class="acts"><button id="mAnom">Lihat detail deteksi</button>'
+      +'<button id="mContent">Analisis konten</button></div>'
     +'<h4>Semua postingan</h4>'+posts.map(p=>postCard(p)).join('');
   const m=$('#mAnom');if(m)m.onclick=anomalyPanel;
+  const mc=$('#mContent');if(mc)mc.onclick=contentPanel;
 }
 
 function zoomTo(id){
@@ -753,7 +904,12 @@ function reportSvg(){
   y+=6;
   addText(px,y,'Anomali: '+((anomaly.cib&&anomaly.cib.clusters)||[]).length+' klaster CIB · '
     +((anomaly.temporal&&anomaly.temporal.bursts)||[]).length+' lonjakan',11,'normal',mut);y+=16;
-  addText(px,y,'Skor buzzer ≥70: '+((anomaly.scores||[]).filter(x=>x.score>=70).length)+' akun',11,'normal',mut);y+=14;
+  addText(px,y,'Skor buzzer ≥70: '+((anomaly.scores||[]).filter(x=>x.score>=70).length)+' akun',11,'normal',mut);y+=16;
+  if(llm.ready){
+    const st=tallyEntries(llm.entries);
+    addText(px,y,'Sentimen: '+st.positif+'+ / '+st.negatif+'- / '+st.netral+' netral',11,'normal',mut);y+=16;
+    addText(px,y,'Topik LLM: '+llm.topics.length+' · toksik: '+st.toxic+' · spam: '+st.spam,11,'normal',mut);y+=14;
+  }
   addText(px,y,'Aktor teratas (degree)',12,'700');y+=19;
   const ids=new Set(g.nodes.map(n=>n.id));
   const top=(metrics&&metrics.degree?[...metrics.degree.entries()]:[])
@@ -761,7 +917,10 @@ function reportSvg(){
   top.forEach(([id,d])=>{addText(px,y,'@'+id+' — '+d,11);y+=17});
   y+=12;
   addText(px,y,'Legenda',12,'700');y+=19;
-  [['komentar',get('--c1')],['mention',get('--c2')],['co-comment',get('--c4')]].forEach(([label,c])=>{
+  const legend=edgeColorBy==='sentimen'&&llm.ready
+    ? [['positif',get('--c3')],['negatif',get('--c2')],['netral',get('--mut')]]
+    : [['komentar',get('--c1')],['mention',get('--c2')],['co-comment',get('--c4')]];
+  legend.forEach(([label,c])=>{
     const l=document.createElementNS(SVGNS,'line');
     l.setAttribute('x1',px);l.setAttribute('x2',px+26);
     l.setAttribute('y1',y-4);l.setAttribute('y2',y-4);
@@ -770,6 +929,7 @@ function reportSvg(){
   });
   y+=10;
   addText(px,y,colorBy==='komunitas'?'Warna node: komunitas'
+    :colorBy==='sentimen'?'Warna node: sentimen mayoritas'
     :'Hijau: penulis post · abu: komentator',10,'normal',mut);y+=16;
   addText(px,y,'Sumber: data.json · Threads SNA',10,'normal',mut);
   return {svg,W,H};
@@ -791,6 +951,10 @@ function bindControls(){
   $('#dateFrom').onchange=e=>{state.dateFrom=e.target.value;apply()};
   $('#dateTo').onchange=e=>{state.dateTo=e.target.value;apply()};
   $('#colorBy').onchange=e=>{colorBy=e.target.value;redrawKeep();panel()};
+  $('#edgeColorBy').onchange=e=>{edgeColorBy=e.target.value;redrawKeep();panel()};
+  $('#sentFilter').onchange=e=>{sentFilter=e.target.value;apply()};
+  $('#hideToxic').onchange=e=>{hideToxic=e.target.checked;apply()};
+  $('#contentBtn').onclick=contentPanel;
   $('#fs').onclick=()=>setFullscreen(!document.body.classList.contains('fs'));
   $('#fsExit').onclick=()=>setFullscreen(false);
   $('#play').onclick=()=>{
@@ -858,4 +1022,16 @@ fetch('data.json')
       +'Buka lewat ./run.sh serve agar fetch lokal diizinkan.');
     try{load(SAMPLE)}catch(x){showWarn('Gagal menampilkan data contoh: '+(x&&x.message||x))}
   });
+/* Hasil LLM bersifat opsional: tanpa file ini viewer tetap berfungsi seperti biasa. */
+fetch('llm_analysis.json')
+  .then(r=>r.ok?r.json():null)
+  .then(d=>{
+    if(!d||!d.comments||typeof d.comments!=='object')return;
+    llm.ready=true;
+    llm.comments=new Map(Object.entries(d.comments));
+    llm.topics=d.topics||[];llm.keywords=d.keywords||[];
+    llm.counts=Object.assign({},d.counts||{},{model:d.model,generated_at:d.generated_at});
+    reindexLlm();apply();
+  })
+  .catch(()=>{});
 </script></body></html>

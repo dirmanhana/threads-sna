@@ -10,6 +10,8 @@ chmod +x install.sh && ./install.sh
 
 Membuat `.venv`, meng-install Playwright dan Chromium. Jika Chromium gagal jalan di Linux karena library sistem: `WITH_DEPS=1 ./install.sh` (butuh sudo).
 
+Untuk fitur analisis konten berbasis LLM, salin `.env.example` menjadi `.env` lalu isi kredensial. File `.env` **tidak pernah dikirim ke browser** dan sudah masuk `.gitignore`. Skrip analisis memakai `urllib` standar Python (tanpa dependency tambahan).
+
 ## Pemakaian
 
 ```bash
@@ -19,6 +21,8 @@ Membuat `.venv`, meng-install Playwright dan Chromium. Jika Chromium gagal jalan
 ./run.sh post https://www.threads.com/@akun/post/XXXX
 ./run.sh serve                              # buka http://localhost:8000/viewer.html
 ./run.sh migrate                            # migrasi data.json lama ke schema baru
+./run.sh analyze                            # analisis konten via LLM -> llm_analysis.json
+./run.sh analyze --limit 100 --dry-run      # cek rencana tanpa panggil API
 ./run.sh test                               # unit test (Python + Node)
 ```
 
@@ -68,6 +72,31 @@ Data lama (sebelum schema ini) bisa dimigrasi dengan `./run.sh migrate`. Backup 
   - **Catatan**: ini heuristik untuk triase, bukan bukti. Usia akun tidak bisa dinilai karena `data.json` tidak punya tanggal pembuatan akun; deteksi detik/menit memerlukan `timestamp` ISO lengkap dari scraper (data lama bertanggal saja ditandai keyakinan lebih rendah).
 - Viewer memuat `data.json` otomatis; tanpa file itu, data contoh tampil dengan banner peringatan. Bisa juga tombol **Muat data.json**.
 - Logika graf murni (build, metrik, Louvain) ada di `viewer_core.js`; bisa dipakai dari Node lewat `require('./viewer_core.js')`.
+
+## Analisis konten (LLM)
+
+Graf menjawab **siapa bicara dengan siapa**; bagian ini menjawab **apa yang mereka bicarakan** dan **bagaimana nadanya**. Analisis dijalankan sebagai skrip batch lokal, bukan di browser:
+
+```bash
+cp .env.example .env          # lalu isi LLM_API_KEY (dan base URL/model bila perlu)
+./run.sh analyze              # baca data.json -> tulis llm_analysis.json
+./run.sh analyze --limit 100  # hanya 100 komentar pertama (uji cepat)
+./run.sh analyze --dry-run    # lihat rencana tanpa memanggil API
+```
+
+- Kredensial dibaca dari `.env` oleh `llm_analyze.py` dan **tidak pernah dikirim ke browser**. Viewer hanya memuat berkas hasil `llm_analysis.json` (gitignored), sehingga tetap berfungsi normal walaupun berkas itu belum ada atau gagal dibuat.
+- Model/config: `LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL=cmd`, `LLM_BATCH_SIZE`, `LLM_TIMEOUT`, `LLM_MAX_TOKENS`. Nilai bawaan ada di `.env.example`. Model `cmd` di gateway ini adalah model *thinking*, jadi `LLM_MAX_TOKENS` perlu besar (≈8000); nilai kecil memotong JSON sebelum selesai.
+- Kunci tiap komentar memakai FNV-1a 64-bit yang identik di Python (`content_key`) dan browser (`SNA.contentKey`), jadi hasil LLM bisa dicocokkan dengan komentar di `data.json` secara sinkron tanpa menyimpan teks mentah di hasil analisis.
+- Topik dibuat sekali dari sampel teks terpanjang, lalu tiap batch komentar diberi label `sentiment` (positif/negatif/netral), `emotion`, `toxicity` (0–1), `spam`, dan `topic` dalam satu panggilan.
+
+Di viewer, hasil LLM otomatis dipakai bila tersedia:
+
+- **Warna: Sentimen** pada node (mayoritas komentar per akun) dan **Edge: Sentimen** pada garis interaksi (netto positif − negatif dari komentar yang melibatkan kedua akun). Berguna melihat akun pusat yang diserang (banyak merah) atau didukung (banyak hijau).
+- **📊 Konten** / tombol **Analisis konten** di panel: distribusi sentimen & emosi, daftar topik beserta kata kunci, *word cloud*, top n-gram, dan contoh komentar dengan toksisitas/spam tertinggi untuk ditinjau. Panel akun dan komunitas juga menampilkan ringkasan konten mereka.
+- Filter **sentimen** dan checkbox **sembunyikan toksik/spam** menyaring komentar lalu menggambar ulang graf dan metrik.
+- Ringkasan sentimen, jumlah topik, toksik, dan spam ikut tercetak di laporan PNG/SVG.
+
+**Catatan**: label LLM (sentimen, emosi, toksisitas, spam) adalah bantuan triase, **bukan penilaian final**. Selalu verifikasi manual komentar yang ditandai, terutama sarkasme dan tuduhan. Akurasi sangat bergantung pada kualitas teks hasil scrape dan perilaku model; simpan hasil dengan `generated_at`/`model` untuk audit.
 
 ## Pemecahan masalah
 

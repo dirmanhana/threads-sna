@@ -46,6 +46,15 @@ Checklist dari saran yang disetujui. Selesai semua pada sesi ini.
 - [x] 9 test Node baru (total 22) untuk normalisasi, CIB (waktu/mirip/renggang/tanggal), bucket+burst, dan skor buzzer
 - [x] Verifikasi browser: data nyata 170 komentar bertimestamp → 4 lonjakan; data sintetis 3 bot → 1 klaster CIB, skor 72 (tinggi), 3 cincin risiko, klik fokus & bucket bekerja, tanpa page error
 
+## Analisis konten & NLP via LLM
+- [x] `.env` + `.env.example` untuk kredensial LLM (`LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL=cmd`, batch/timeout/max tokens); `.env` & `llm_analysis.json` gitignored
+- [x] Skrip batch `llm_analyze.py`: topik + keyword sekali, lalu label sentimen/emotion/toxicity/spam/topic per batch, retry + penulisan atomik
+- [x] `content_key` FNV-1a 64-bit identik di Python dan `SNA.contentKey` (browser) + paritas di test Python/Node
+- [x] Viewer: warna node/edge sentimen, filter sentimen & sembunyikan toksik/spam, panel 📊 Konten (distribusi, topik, word cloud, n-gram, contoh toksik), ringkasan di laporan
+- [x] Token LLM tidak dikirim ke browser; viewer tetap jalan tanpa `llm_analysis.json`
+- [x] Test: 8 test Python baru (env/key/collect/parse/request) + 1 test Node (paritas kunci) → total 16 Python + 23 Node
+- [x] Verifikasi browser dengan hasil LLM sintetis: panel, word cloud/n-gram, warna sentimen, filter (819→779→777 komentar), panel akun, laporan, tanpa page error
+
 ## Perbaikan lanjutan
 - [x] Bug: akun yang hanya disebut (@mention) tidak punya node → `d3.forceLink` melempar `node not found`, yang salah dilaporkan sebagai "Gagal memuat data.json" / "JSON tidak valid"
 - [x] Pisahkan error parse JSON vs error render di banner viewer; beri petunjuk `./run.sh serve` kalau `fetch` diblokir

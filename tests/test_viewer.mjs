@@ -226,8 +226,14 @@ test('metrik tetap bekerja pada graf yang sudah dimutasi d3.forceLink', () => {
 /* ---------- deteksi anomali / anti-buzzer ---------- */
 const ISO = (minute, day = 7) => `2026-10-${String(day).padStart(2, '0')}T09:${String(minute).padStart(2, '0')}:00Z`;
 
+test('contentKey cocok dengan content_key() Python', () => {
+  assert.equal(SNA.contentKey('budi', 'A1', 'Mantap @host!!!'), 'f1ad6100b000eebc');
+  assert.equal(SNA.contentKey('sari', 'X9', 'Halo dunia'), 'ae5207c62875cdf2');
+  assert.equal(SNA.contentKey('', '', 'teks'), '68bdfa3821b7f5fc');
+});
+
 test('ekspor fungsi anomali tersedia', () => {
-  for (const fn of ['normText', 'textTokens', 'tokenKey', 'detectCIB', 'temporalBuckets', 'bucketEvents', 'buzzerScores']) {
+  for (const fn of ['normText', 'textTokens', 'tokenKey', 'contentKey', 'detectCIB', 'temporalBuckets', 'bucketEvents', 'buzzerScores']) {
     assert.equal(typeof SNA[fn], 'function', fn);
   }
 });
