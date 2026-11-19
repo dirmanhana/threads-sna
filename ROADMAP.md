@@ -90,6 +90,15 @@ Checklist dari saran yang disetujui. Selesai semua pada sesi ini.
 - [x] Pencarian global → `/viewer.html?focus=<akun>`; `ViewerPage` membaca parameter dan memfokuskan akun setelah data termuat
 - [x] `llm_server.py` memetakan `/`, `/index.html`, `/ringkasan.html` ke build React
 
+## Tata letak Mosaic (tahap 3)
+- [x] Viewer grid 8/4 pada ≥1280 px: graf `col-span-8`, panel informasi `col-span-4`; ponsel satu kolom dengan graf 420–520 px
+- [x] Panel info bertab **Metrik | Postingan | Komentar | Anomali**, badge jumlah anomali, dan pencarian di dalam tab
+- [x] Pagination: 10 postingan/halaman, 20 komentar/halaman; diskusi postingan dilipat dan dimuat 20 komentar per klik
+- [x] Panel memakai scroll internal (`overflow-y-auto`) dengan tinggi terbatas, bukan halaman yang memanjang
+- [x] Graf D3 auto-fit ke viewport setelah simulasi dan saat kontainer berubah (mis. layar penuh); label disembunyikan saat zoom rendah
+- [x] Komponen `PostCard`/tab dipindah ke level modul agar state pagination dan lipatan tidak hilang saat parent re-render
+- [x] Verifikasi Playwright desktop 1440 px + ponsel 390 px: 32 pemeriksaan lulus (tab, pagination, lipat diskusi, pencarian, `?focus=`, bucket, replay, layar penuh, tanpa overflow/page error)
+
 ## Verifikasi
 - `./run.sh test` → 26 test Python + 23 test Node lulus (termasuk 10 test API scraping dengan stub)
 - Playwright: `/`, `/ringkasan.html`, `/index.html`, `/viewer.html`, `/sentimen.html`, `/scrape.html` tanpa page error; desktop 1440 px dan ponsel 390 px tanpa overflow horizontal

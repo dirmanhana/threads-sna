@@ -27,6 +27,7 @@ export default function ViewerPage() {
   const [isolate, setIsolate] = useState(false);
   const [panelUser, setPanelUser] = useState(null);
   const [panelMode, setPanelMode] = useState({ kind: 'default' });
+  const [panelTab, setPanelTab] = useState('metrik');
   const [linkDetail, setLinkDetail] = useState(null);
   const [anonOpts, setAnonOpts] = useState({ windowMs: 600000, minAccounts: 3 });
   const [tlGran, setTlGran] = useState('auto');
@@ -46,6 +47,7 @@ export default function ViewerPage() {
     setAll(arr);
     setReplay({ events: buildEvents(SNA, arr), i: 0, playing: false, active: false });
     setFocus(null); setIsolate(false); setPanelUser(null); setPanelMode({ kind: 'default' });
+    setPanelTab('metrik');
     setSelectedBucket(null); setLinkDetail(null); setWarn('');
   }, []);
 
@@ -192,6 +194,12 @@ export default function ViewerPage() {
     ...r, playing: false, active: keepPosition ? r.active : false, i: keepPosition ? r.i : r.events.length,
   }));
 
+  const openAnomaly = () => {
+    if (replay.active) stopReplay(false);
+    setPanelMode({ kind: 'default' });
+    setPanelTab('anomali');
+  };
+
   const changeFilter = (fn) => {
     if (replay.active) { stopReplay(false); setPanelMode({ kind: 'default' }); }
     fn();
@@ -287,7 +295,7 @@ export default function ViewerPage() {
   return (
     <Layout page="viewer" title="Peta Jaringan" subtitle="Siapa bicara dengan siapa — interaktif, lokal, tanpa backend"
       wide actions={actions}>
-      <div className="flex flex-col gap-3" style={{ height: 'calc(100vh - 248px)', minHeight: 620 }}>
+      <div className="flex flex-col gap-3 xl:h-[calc(100vh-248px)] xl:min-h-[620px]">
         {warn && (
           <div className="rounded-xl bg-red-700 px-4 py-2.5 text-sm text-white">{warn}
             <button className="ml-3 underline" onClick={() => setWarn('')}>tutup</button>
@@ -354,13 +362,13 @@ export default function ViewerPage() {
                   <option value="1">1×</option><option value="5">5×</option><option value="20">20×</option>
                 </select></span>
               <span className="min-w-[150px] font-variant-numeric tabular-nums">{replayInfo}</span>
-              <button className="btn" onClick={() => setPanelMode({ kind: 'anomaly' })} title="Deteksi komentar terkoordinasi & skor buzzer">🚨 Anomali</button>
+              <button className="btn" onClick={openAnomaly} title="Deteksi komentar terkoordinasi & skor buzzer">🚨 Anomali</button>
             </div>
           </div>
         )}
 
-        <div className="flex min-h-0 flex-1 gap-3">
-          <div className="card relative min-w-0 flex-1 overflow-hidden bg-white dark:bg-gray-900">
+        <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 xl:grid-cols-12">
+          <div className={`card relative h-[420px] min-w-0 overflow-hidden bg-white sm:h-[520px] xl:h-auto xl:min-h-0 dark:bg-gray-900 ${fs ? 'xl:col-span-12' : 'xl:col-span-8'}`}>
             <GraphCanvas
               ref={graphRef}
               graph={visibleGraph}
@@ -377,23 +385,25 @@ export default function ViewerPage() {
             />
           </div>
           {!fs && (
-            <aside className="w-[340px] max-w-[45%] shrink-0 overflow-y-auto rounded-2xl border border-slate-200 bg-white p-3 text-xs shadow-card dark:border-gray-700 dark:bg-gray-800">
-              <InfoPanel
-                SNA={SNA} mode={panelModeEffective} posts={posts} graph={baseGraph} metrics={metrics}
-                anomaly={anomaly} anonOpts={anonOpts} replay={replay} keyword={appliedKw}
-                selectedBucket={selectedBucket} focus={focus} isolate={isolate} panelUser={panelUser}
-                linkDetail={linkDetail}
-                onFocus={(u) => focusUser(u, true)} onUnfocus={unfocus}
-                onToggleIsolate={() => { if (!panelUser) return; setFocus(panelUser); setIsolate((v) => !v); setActor(panelUser); setPanelMode({ kind: 'user' }); }}
-                onOpenThreads={() => { if (panelUser) window.open(authorUrl(all, panelUser), '_blank', 'noopener'); }}
-                onAnomalyPanel={() => setPanelMode({ kind: 'anomaly' })}
-                onClosePanel={() => setPanelMode({ kind: 'default' })}
-                onBucket={(t) => { setSelectedBucket(t); setPanelMode({ kind: 'bucket' }); }}
-                onReplayBack={() => { stopReplay(false); setPanelMode({ kind: 'default' }); }}
-                onRefreshAnomaly={() => setAnomalyTick((t) => t + 1)}
-                onAnonWin={(v) => setAnonOpts((o) => ({ ...o, windowMs: v * 60000 }))}
-                onAnonMin={(v) => setAnonOpts((o) => ({ ...o, minAccounts: v }))}
-              />
+            <aside className="min-h-0 xl:col-span-4">
+              <div className="card flex max-h-[70vh] flex-col overflow-hidden text-xs xl:h-full xl:max-h-none">
+                <InfoPanel
+                  SNA={SNA} mode={panelModeEffective} posts={posts} graph={baseGraph} metrics={metrics}
+                  anomaly={anomaly} anonOpts={anonOpts} replay={replay} keyword={appliedKw}
+                  selectedBucket={selectedBucket} focus={focus} isolate={isolate} panelUser={panelUser}
+                  linkDetail={linkDetail} tab={panelTab} onTab={setPanelTab}
+                  onFocus={(u) => focusUser(u, true)} onUnfocus={unfocus}
+                  onToggleIsolate={() => { if (!panelUser) return; setFocus(panelUser); setIsolate((v) => !v); setActor(panelUser); setPanelMode({ kind: 'user' }); }}
+                  onOpenThreads={() => { if (panelUser) window.open(authorUrl(all, panelUser), '_blank', 'noopener'); }}
+                  onAnomalyPanel={openAnomaly}
+                  onClosePanel={() => setPanelMode({ kind: 'default' })}
+                  onBucket={(t) => { setSelectedBucket(t); setPanelMode({ kind: 'bucket' }); }}
+                  onReplayBack={() => { stopReplay(false); setPanelMode({ kind: 'default' }); }}
+                  onRefreshAnomaly={() => setAnomalyTick((t) => t + 1)}
+                  onAnonWin={(v) => setAnonOpts((o) => ({ ...o, windowMs: v * 60000 }))}
+                  onAnonMin={(v) => setAnonOpts((o) => ({ ...o, minAccounts: v }))}
+                />
+              </div>
             </aside>
           )}
         </div>

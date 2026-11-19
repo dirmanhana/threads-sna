@@ -22,6 +22,9 @@ const GraphCanvas = forwardRef(function GraphCanvas(props, ref) {
   const tipEl = useRef(null);
   const propsRef = useRef(props);
   propsRef.current = props;
+  const fitRef = useRef(null);
+  const fitTimer = useRef(null);
+  const userZoom = useRef(false);
 
   useEffect(() => {
     const svg = d3.select(svgEl.current);
@@ -31,14 +34,55 @@ const GraphCanvas = forwardRef(function GraphCanvas(props, ref) {
       .attr('viewBox', '0 -4 8 8').attr('refX', 18)
       .attr('markerWidth', 6).attr('markerHeight', 6).attr('orient', 'auto');
     defs.append('path').attr('d', 'M0,-4L8,0L0,4Z').attr('fill', 'context-stroke');
-    const zoom = d3.zoom().scaleExtent([.2, 4]).on('zoom', (e) => {
-      d3.select(rootEl.current).attr('transform', e.transform);
+    const zoom = d3.zoom().scaleExtent([.08, 4]).on('zoom', (e) => {
+      if (e.sourceEvent) userZoom.current = true;
+      const root = d3.select(rootEl.current);
+      root.attr('transform', e.transform);
+      // Label akun disembunyikan saat memperkecil agar tidak menutupi graf.
+      root.classed('sna-zoom-out', e.transform.k < .45);
     });
     zoomRef.current = zoom;
     svg.call(zoom).on('dblclick.zoom', null);
     svg.on('click', () => { propsRef.current.onBackgroundClick?.(); });
-    return () => { simRef.current?.stop(); };
+
+    // Jaga graf tetap terlihat saat ukuran kontainer berubah (mis. layar penuh).
+    let raf = 0;
+    const ro = new ResizeObserver(() => {
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(() => fitRef.current?.(false));
+    });
+    ro.observe(svgEl.current);
+
+    return () => {
+      simRef.current?.stop();
+      clearTimeout(fitTimer.current);
+      cancelAnimationFrame(raf);
+      ro.disconnect();
+    };
   }, []);
+
+  /* Skala & geser seluruh graf agar muat di kontainer. */
+  function fitView(animate = true, force = false) {
+    const el = svgEl.current;
+    const nodes = (propsRef.current.graph?.nodes || []).filter((n) => Number.isFinite(n.x) && Number.isFinite(n.y));
+    if (!el || !nodes.length || !zoomRef.current || (userZoom.current && !force)) return;
+    const W = el.clientWidth || 800, H = el.clientHeight || 600;
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    nodes.forEach((n) => {
+      const r = radius(n);
+      x0 = Math.min(x0, n.x - r); x1 = Math.max(x1, n.x + r);
+      y0 = Math.min(y0, n.y - r); y1 = Math.max(y1, n.y + r);
+    });
+    const pad = 24;
+    const k = Math.max(.08, Math.min(4, Math.min((W - pad * 2) / Math.max(1, x1 - x0), (H - pad * 2) / Math.max(1, y1 - y0))));
+    const tr = d3.zoomIdentity
+      .translate(W / 2 - k * (x0 + x1) / 2, H / 2 - k * (y0 + y1) / 2)
+      .scale(k);
+    const sel = d3.select(el);
+    if (animate) sel.transition().duration(450).call(zoomRef.current.transform, tr);
+    else sel.call(zoomRef.current.transform, tr);
+  }
+  fitRef.current = fitView;
 
   function showTip(html, e) {
     const t = tipEl.current;
@@ -80,6 +124,9 @@ const GraphCanvas = forwardRef(function GraphCanvas(props, ref) {
     const root = d3.select(rootEl.current);
     root.selectAll('*').remove();
     simRef.current?.stop();
+    clearTimeout(fitTimer.current);
+    // Saat ada fokus akun, biarkan zoom ke akun; jangan fit ulang seluruh graf.
+    userZoom.current = !!p.focus;
     hideTip();
 
     // Pulihkan posisi node yang masih dikenal (mis. setelah filter berubah).
@@ -136,9 +183,12 @@ const GraphCanvas = forwardRef(function GraphCanvas(props, ref) {
     nd.append('text').attr('dy', (d) => -radius(d) - 3).attr('text-anchor', 'middle')
       .text((d) => '@' + d.id);
 
+    const n = g.nodes.length;
+    const charge = -320 * Math.max(.18, Math.min(1, 160 / Math.max(1, n)));
+    const dist = n > 400 ? 70 : 110;
     simRef.current = d3.forceSimulation(g.nodes)
-      .force('l', d3.forceLink(g.links).id((d) => d.id).distance(110))
-      .force('c', d3.forceManyBody().strength(-320))
+      .force('l', d3.forceLink(g.links).id((d) => d.id).distance(dist))
+      .force('c', d3.forceManyBody().strength(charge))
       .force('m', d3.forceCenter(W / 2, H / 2))
       .force('x', d3.forceCollide().radius((d) => radius(d) + 8))
       .on('tick', () => {
@@ -146,7 +196,13 @@ const GraphCanvas = forwardRef(function GraphCanvas(props, ref) {
           .attr('x2', (d) => d.target.x).attr('y2', (d) => d.target.y);
         nd.attr('transform', (d) => `translate(${d.x},${d.y})`);
         g.nodes.forEach((n) => posRef.current.set(n.id, { x: n.x, y: n.y }));
-      });
+      })
+      .on('end', () => fitView());
+    // Simulasi besar butuh beberapa detik; fit lebih awal agar graf langsung terlihat.
+    fitTimer.current = setTimeout(() => {
+      fitView();
+      fitTimer.current = setTimeout(() => fitView(), 1500);
+    }, 900);
   }
 
   useImperativeHandle(ref, () => ({
@@ -155,13 +211,15 @@ const GraphCanvas = forwardRef(function GraphCanvas(props, ref) {
     zoomTo: (id) => {
       const n = (propsRef.current.graph?.nodes || []).find((x) => x.id === id);
       if (!n || !zoomRef.current) return;
+      userZoom.current = true;
       const el = svgEl.current, W = el.clientWidth || 800, H = el.clientHeight || 600;
       const k = Math.max(1.2, d3.zoomTransform(el).k || 1);
       const tr = d3.zoomIdentity.translate(W / 2 - k * (n.x || 0), H / 2 - k * (n.y || 0)).scale(k);
       d3.select(el).transition().duration(450).call(zoomRef.current.transform, tr);
     },
     resetZoom: () => {
-      if (zoomRef.current) d3.select(svgEl.current).transition().duration(350).call(zoomRef.current.transform, d3.zoomIdentity);
+      userZoom.current = false;
+      fitView(true, true);
     },
     getSvg: () => svgEl.current,
   }));

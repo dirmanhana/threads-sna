@@ -89,3 +89,6 @@ svg text { fill: var(--fg); font-size: 11px; pointer-events: none; }
 }
 
 mark { background: #fac775; color: #1a1a1a; border-radius: 2px; }
+
+/* Graf jaringan: label akun hanya tampil saat cukup diperbesar. */
+.sna-zoom-out text { display: none; }
