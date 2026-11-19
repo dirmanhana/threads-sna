@@ -222,3 +222,140 @@ test('metrik tetap bekerja pada graf yang sudah dimutasi d3.forceLink', () => {
   assert.equal(a.communities.size, 3);
   assert.ok(a.eigenvector.size === 3);
 });
+
+/* ---------- deteksi anomali / anti-buzzer ---------- */
+const ISO = (minute, day = 7) => `2026-10-${String(day).padStart(2, '0')}T09:${String(minute).padStart(2, '0')}:00Z`;
+
+test('ekspor fungsi anomali tersedia', () => {
+  for (const fn of ['normText', 'textTokens', 'tokenKey', 'detectCIB', 'temporalBuckets', 'bucketEvents', 'buzzerScores']) {
+    assert.equal(typeof SNA[fn], 'function', fn);
+  }
+});
+
+test('normText/tokenKey: abaikan mention, url, tanda baca, emoji, urutan kata', () => {
+  assert.equal(SNA.tokenKey('Mantap @budiman!!! https://x.co/a 🔥'), 'mantap');
+  assert.equal(SNA.tokenKey('Setuju kak, harga nya mahal'), SNA.tokenKey('mahal nya harga setuju kak'));
+  assert.deepEqual(SNA.textTokens('a b a'), ['a', 'b']);
+});
+
+test('detectCIB: klaster copy-paste 3 akun dalam 10 menit terdeteksi', () => {
+  const posts = [{ code: 'A1', author: 'host', text: 'x', replies: [
+    { author: 'bot1', text: 'Pemerintah harus segera turun tangan @host!!!', timestamp: ISO(1) },
+    { author: 'bot2', text: 'Pemerintah harus segera turun tangan @host!!!', timestamp: ISO(3) },
+    { author: 'bot3', text: 'Pemerintah harus segera turun tangan @host!!!', timestamp: ISO(8) },
+    { author: 'sari', text: 'Setuju sekali, ini perlu dibahas', timestamp: ISO(9) }
+  ] }];
+  const r = SNA.detectCIB(posts);
+  assert.equal(r.hasTime, true);
+  assert.equal(r.clusters.length, 1);
+  const c = r.clusters[0];
+  assert.equal(c.windowCount, 3);
+  assert.deepEqual(c.windowAuthors, ['bot1', 'bot2', 'bot3']);
+  assert.equal(c.resolution, 'time');
+  assert.ok(c.confidence > 0.6);
+});
+
+test('detectCIB: komentar mirip (kata diurut ulang) tetap terkelompok, yang terlalu singkat diabaikan', () => {
+  const posts = [{ code: 'A1', author: 'host', text: 'x', replies: [
+    { author: 'b1', text: 'Bangun ekonomi rakyat sekarang juga', timestamp: ISO(2) },
+    { author: 'b2', text: 'Sekarang juga rakyat ekonomi bangun', timestamp: ISO(4) },
+    { author: 'b3', text: 'Ekonomi rakyat bangun sekarang juga', timestamp: ISO(6) },
+    { author: 'b4', text: 'Bangun ekonomi rakyat sekarang juga', timestamp: ISO(7) },
+    { author: 'b5', text: 'Wah', timestamp: ISO(8) },
+    { author: 'b6', text: 'Setuju', timestamp: ISO(8) }
+  ] }];
+  const r = SNA.detectCIB(posts, { minLen: 12 });
+  assert.ok(r.clusters.length >= 1);
+  assert.ok(r.clusters[0].windowCount >= 3);
+  assert.ok(!r.clusters.some(c => /^(wah|setuju)$/i.test(c.text.trim())), 'teks pendek tidak boleh masuk');
+});
+
+test('detectCIB: komentar sama tapi renggang berjam-jam tidak masuk jendela', () => {
+  const posts = [{ code: 'A1', author: 'host', text: 'x', replies: [
+    { author: 'b1', text: 'Kalau begini kita harus segera bertindak bersama', timestamp: '2026-10-07T01:00:00Z' },
+    { author: 'b2', text: 'Kalau begini kita harus segera bertindak bersama', timestamp: '2026-10-07T09:00:00Z' },
+    { author: 'b3', text: 'Kalau begini kita harus segera bertindak bersama', timestamp: '2026-10-07T17:00:00Z' }
+  ] }];
+  assert.equal(SNA.detectCIB(posts).clusters.length, 0);
+});
+
+test('detectCIB: timestamp hanya tanggal ditandai resolution date & confidence lebih rendah', () => {
+  const posts = [{ code: 'A1', author: 'host', text: 'x', replies: [
+    { author: 'b1', text: 'Desakan publik terus mengalir ke pemerintah pusat', timestamp: '2026-10-07' },
+    { author: 'b2', text: 'Desakan publik terus mengalir ke pemerintah pusat', timestamp: '2026-10-07' },
+    { author: 'b3', text: 'Desakan publik terus mengalir ke pemerintah pusat', timestamp: '2026-10-07' }
+  ] }];
+  const r = SNA.detectCIB(posts);
+  assert.equal(r.hasTime, false);
+  assert.equal(r.clusters.length, 1);
+  assert.equal(r.clusters[0].resolution, 'date');
+  assert.ok(r.clusters[0].confidence < 0.7);
+});
+
+test('temporalBuckets: bucket harian, lonjakan terdeteksi, tanpa timestamp diabaikan', () => {
+  const replies = [];
+  for (let d = 1; d <= 5; d++) for (let i = 0; i < 2; i++) {
+    replies.push({ author: 'u' + i, text: 'halo ' + d, timestamp: '2026-10-0' + d });
+  }
+  for (let i = 0; i < 20; i++) replies.push({ author: 'b' + i, text: 'teriak ' + i, timestamp: '2026-10-06' });
+  replies.push({ author: 'x', text: 'tanpa waktu' });
+  const posts = [{ code: 'A1', author: 'host', text: 'x', replies }];
+  const t = SNA.temporalBuckets(posts, { granularity: 'day' });
+  assert.equal(t.granularity, 'day');
+  assert.equal(t.hasTime, false);
+  assert.equal(t.total, 30);
+  assert.equal(t.buckets.length, 6);
+  assert.equal(t.buckets.find(b => b.t === Date.UTC(2026, 9, 6)).count, 20);
+  assert.equal(t.bursts.length, 1);
+  assert.equal(t.bursts[0].count, 20);
+  assert.ok(t.bursts[0].ratio > 5);
+  assert.equal(SNA.bucketEvents(posts, Date.UTC(2026, 9, 6), { stepMs: t.stepMs }).length, 20);
+});
+
+test('temporalBuckets: pilih jam otomatis bila ada jam, dan aman untuk data kosong', () => {
+  const posts = [{ code: 'A1', author: 'host', text: 'x', replies: [
+    { author: 'a', text: 'x1', timestamp: '2026-10-07T09:05:00Z' },
+    { author: 'b', text: 'x2', timestamp: '2026-10-07T09:35:00Z' },
+    { author: 'c', text: 'x3', timestamp: '2026-10-07T11:05:00Z' }
+  ] }];
+  const t = SNA.temporalBuckets(posts);
+  assert.equal(t.granularity, 'hour');
+  assert.equal(t.hasTime, true);
+  assert.equal(t.buckets.length, 2);
+  assert.equal(t.buckets[0].count, 2);
+  const empty = SNA.temporalBuckets([]);
+  assert.equal(empty.total, 0);
+  assert.deepEqual(empty.buckets, []);
+  assert.deepEqual(empty.bursts, []);
+  assert.equal(empty.first, null);
+});
+
+test('buzzerScores: akun tanpa post, repetitif, satu target, dapat skor tinggi', () => {
+  const replies = [];
+  for (let i = 0; i < 30; i++) {
+    replies.push({ author: 'buzzer', text: 'Turun tangan sekarang juga @host', timestamp: ISO(i % 60, 7) });
+    if (i < 20) replies.push({ author: 'buzzer2', text: 'Turun tangan sekarang juga @host', timestamp: ISO(i % 60, 7) });
+    if (i < 20) replies.push({ author: 'buzzer3', text: 'Turun tangan sekarang juga @host', timestamp: ISO(i % 60, 7) });
+  }
+  const posts = [{ code: 'A1', author: 'host', text: 'x', replies },
+                 { code: 'A2', author: 'normal', text: 'y', replies: [
+                   { author: 'sari', text: 'Wah keren sekali ya', timestamp: ISO(1) },
+                   { author: 'rudi', text: 'Setuju dengan pendapat ini', timestamp: ISO(2) }
+                 ] }];
+  const cib = SNA.detectCIB(posts);
+  const scores = SNA.buzzerScores(posts, { clusters: cib.clusters });
+  const buzzer = scores.find(s => s.id === 'buzzer');
+  assert.ok(buzzer.score >= 70, 'skor buzzer: ' + buzzer.score);
+  assert.equal(buzzer.level, 'tinggi');
+  assert.equal(buzzer.posts, 0);
+  assert.equal(buzzer.targets, 1);
+  assert.equal(buzzer.repeatRatio, 100);
+  assert.ok(buzzer.reasons.some(r => /berulang/.test(r)));
+  assert.ok(buzzer.reasons.some(r => /1 akun/.test(r)));
+  assert.ok(buzzer.cib >= 1);
+  const normal = scores.find(s => s.id === 'normal');
+  assert.equal(normal.score, 0);
+  assert.equal(normal.level, 'rendah');
+  assert.equal(scores[0].id, 'buzzer');
+  assert.deepEqual(SNA.buzzerScores([]), []);
+});

@@ -38,13 +38,21 @@ Checklist dari saran yang disetujui. Selesai semua pada sesi ini.
 - [x] Snapshot & report export: **PNG/SVG laporan** — satu gambar berisi graf penuh + ringkasan statistik (postingan, komentar, thread, akun, relasi, komunitas, 5 aktor teratas) + legenda edge/node. PNG laporan ~6000 px (teruji 6000×5509).
 - [x] Fix scrub: baca nilai slider sebelum `stopReplay()` menimpa `slider.value` dengan posisi lama (scrub 60 kini benar-benar loncat ke 60/903).
 
+## Deteksi anomali & perilaku akun (anti-buzzer/bot)
+- [x] Fungsi murni di `viewer_core.js`: `normText`, `textTokens`, `tokenKey`, `detectCIB`, `temporalBuckets`, `bucketEvents`, `buzzerScores`
+- [x] CIB: normalisasi teks + Jaccard ≥0,8, jendela 5/10/30 mnt, minimal 2/3/5 akun, confidence lebih rendah untuk timestamp bertanggal saja
+- [x] Timeline batang interaktif (menit/jam/hari/otomatis) + deteksi lonjakan robust (median/MAD leave-one-out) + detail bucket
+- [x] Skor buzzer 0–100 + alasan, sorotan ring merah/kuning di graf, panel 🚨 Anomali, ringkasan ikut ke ekspor laporan
+- [x] 9 test Node baru (total 22) untuk normalisasi, CIB (waktu/mirip/renggang/tanggal), bucket+burst, dan skor buzzer
+- [x] Verifikasi browser: data nyata 170 komentar bertimestamp → 4 lonjakan; data sintetis 3 bot → 1 klaster CIB, skor 72 (tinggi), 3 cincin risiko, klik fokus & bucket bekerja, tanpa page error
+
 ## Perbaikan lanjutan
 - [x] Bug: akun yang hanya disebut (@mention) tidak punya node → `d3.forceLink` melempar `node not found`, yang salah dilaporkan sebagai "Gagal memuat data.json" / "JSON tidak valid"
 - [x] Pisahkan error parse JSON vs error render di banner viewer; beri petunjuk `./run.sh serve` kalau `fetch` diblokir
 - [x] Tambah test regresi mention-only node (13 test Node)
 
 ## Verifikasi
-- `./run.sh test` → 8 test Python + 13 test Node lulus
+- `./run.sh test` → 8 test Python + 22 test Node lulus
 - Uji browser headless: data.json termuat via HTTP **dan** via input file; `file://` menampilkan petunjuk serve; JSON rusak tetap terdeteksi; toggle co-comment tanpa page error
 - `SNA.build(data.posts)` → 665 akun · 753 relasi · 20 komunitas (default)
 - Filter tanggal & toggle co-comment sudah diuji terhadap data nyata

@@ -413,8 +413,250 @@
     return sizes;
   }
 
+  /* ---------- deteksi anomali / perilaku terkoordinasi ---------- */
+  const MINUTE = 60000;
+  const HOUR = 3600000;
+
+  /* Teks dibersihkan dari URL, @mention, tanda baca, dan emoji supaya
+   * komentar copy-paste dengan target/emoji berbeda tetap terkelompok. */
+  function normText(v) {
+    return str(v).toLowerCase()
+      .replace(/https?:\/\/\S+/g, ' ')
+      .replace(/@([\w.]+)/g, ' ')
+      .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+      .replace(/\s+/g, ' ').trim();
+  }
+  function textTokens(v) {
+    return [...new Set(normText(v).split(' ').filter(Boolean))].sort(cmp);
+  }
+  const tokenKey = v => textTokens(v).join(' ');
+  function jaccard(a, b) {
+    let i = 0, j = 0, inter = 0;
+    while (i < a.length && j < b.length) {
+      if (a[i] === b[j]) { inter++; i++; j++; }
+      else if (a[i] < b[j]) i++;
+      else j++;
+    }
+    const uni = a.length + b.length - inter;
+    return uni ? inter / uni : 0;
+  }
+
+  /* Coordinated Inauthentic Behavior: komentar identik/mirip dari >= minAccounts
+   * akun berbeda dalam jendela waktu windowMs. Timestamp hanya bertanggal
+   * ditandai resolution:'date' dan confidence lebih rendah (tidak bisa
+   * membedakan detik/menit). */
+  function detectCIB(posts, opts) {
+    const o = opts || {};
+    const windowMs = Number.isFinite(o.windowMs) ? Math.max(1, o.windowMs) : 10 * MINUTE;
+    const minAccounts = Number.isFinite(o.minAccounts) ? Math.max(2, o.minAccounts) : 3;
+    const minLen = Number.isFinite(o.minLen) ? Math.max(4, o.minLen) : 12;
+    const similarity = Number.isFinite(o.similarity) ? Math.min(1, Math.max(0, o.similarity)) : 0.8;
+    const items = [];
+    let hasTime = false;
+
+    (Array.isArray(posts) ? posts : []).forEach(p => {
+      const replies = Array.isArray(p && p.replies) ? p.replies : [];
+      replies.forEach(r => {
+        const who = str(r && r.author).trim();
+        const text = str(r && r.text);
+        const toks = textTokens(text);
+        if (!who || toks.join(' ').length < minLen) return;
+        const t = parseDate(r && r.timestamp);
+        if (t != null && t % MS_DAY !== 0) hasTime = true;
+        items.push({ author: who, text, toks, t, timestamp: r.timestamp == null ? null : r.timestamp,
+                     post: str(p && p.code) });
+      });
+    });
+
+    const groups = new Map();
+    items.forEach(it => {
+      const k = it.toks.join(' ');
+      if (!groups.has(k)) groups.set(k, []);
+      groups.get(k).push(it);
+    });
+
+    // Gabungkan key yang mirip (Jaccard) — bukan cuma persis sama.
+    const keys = [...groups.keys()].filter(k => groups.get(k).length >= 2);
+    const parent = new Map(keys.map(k => [k, k]));
+    const find = k => { while (parent.get(k) !== k) { parent.set(k, parent.get(parent.get(k))); k = parent.get(k); } return k; };
+    const union = (a, b) => { a = find(a); b = find(b); if (a !== b) parent.set(b, a); };
+    for (let i = 0; i < keys.length; i++) {
+      for (let j = i + 1; j < keys.length; j++) {
+        if (find(keys[i]) === find(keys[j])) continue;
+        if (jaccard(textTokens(keys[i]), textTokens(keys[j])) >= similarity) union(keys[i], keys[j]);
+      }
+    }
+    const merged = new Map();
+    keys.forEach(k => {
+      const root = find(k);
+      if (!merged.has(root)) merged.set(root, []);
+      merged.get(root).push(...groups.get(k));
+    });
+
+    const clusters = [];
+    merged.forEach(list => {
+      const authors = [...new Set(list.map(it => it.author))];
+      if (authors.length < minAccounts) return;
+      const timed = list.filter(it => it.t != null).sort((a, b) => a.t - b.t);
+      if (timed.length < minAccounts) return;
+      // Sliding window: cari jumlah komentar terpadat dalam windowMs.
+      let bestI = 0, bestN = 0;
+      for (let i = 0; i < timed.length; i++) {
+        let j = i;
+        while (j < timed.length && timed[j].t - timed[i].t <= windowMs) j++;
+        if (j - i > bestN) { bestN = j - i; bestI = i; }
+      }
+      if (bestN < minAccounts) return;
+      const hi = timed[bestI + bestN - 1].t;
+      const winAuthors = [...new Set(timed.filter(it => it.t >= timed[bestI].t && it.t <= hi).map(it => it.author))];
+      if (winAuthors.length < minAccounts) return;
+      const biggest = list.reduce((a, b) => b.text.length > a.text.length ? b : a, list[0]);
+      clusters.push({
+        key: tokenKey(biggest.text), text: biggest.text,
+        count: list.length, authors: authors.sort(cmp),
+        windowCount: bestN, windowAuthors: winAuthors.sort(cmp),
+        first: timed[0].t, last: timed[timed.length - 1].t,
+        spanMs: timed[timed.length - 1].t - timed[0].t,
+        posts: [...new Set(list.map(it => it.post))].sort(cmp),
+        resolution: hasTime ? 'time' : 'date',
+        confidence: hasTime ? Math.min(1, 0.5 + bestN / 20) : Math.min(0.6, 0.3 + bestN / 30),
+        items: list.map(it => ({ author: it.author, text: it.text, timestamp: it.timestamp,
+                                 post: it.post, t: it.t }))
+      });
+    });
+    clusters.sort((a, b) => b.windowCount - a.windowCount || b.count - a.count || cmp(a.key, b.key));
+    return { clusters, hasTime, windowMs, minAccounts, total: items.length };
+  }
+
+  function median(a) {
+    if (!a.length) return 0;
+    const s = [...a].sort((x, y) => x - y), m = s.length >> 1;
+    return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
+  }
+  function detectBursts(buckets, k) {
+    if (buckets.length < 2) return [];
+    const counts = buckets.map(b => b.count);
+    const out = [];
+    counts.forEach((count, i) => {
+      // Leave-one-out: lonjakan itu sendiri tidak boleh menggeser baseline.
+      const others = counts.filter((_, j) => j !== i);
+      const base = median(others);
+      const mad = median(others.map(c => Math.abs(c - base)));
+      const threshold = mad > 0 ? base + k * 1.4826 * mad : base + k * Math.max(1, base / 2);
+      const floor = Math.max(3, base * 2, Math.ceil(base + 1));
+      if (count >= threshold && count >= floor) {
+        out.push({ t: buckets[i].t, count, threshold: Math.ceil(threshold),
+                   ratio: base > 0 ? Math.round(count / base * 100) / 100 : null });
+      }
+    });
+    return out;
+  }
+
+  /* Volume komentar per menit/jam/hari + deteksi lonjakan (robust median/MAD). */
+  function temporalBuckets(posts, opts) {
+    const o = opts || {};
+    const events = [];
+    let hasTime = false;
+    (Array.isArray(posts) ? posts : []).forEach(p => {
+      const src = o.includeThread
+        ? [...(Array.isArray(p && p.replies) ? p.replies : []), ...(Array.isArray(p && p.thread) ? p.thread : [])]
+        : (Array.isArray(p && p.replies) ? p.replies : []);
+      src.forEach(r => {
+        const t = parseDate(r && r.timestamp);
+        if (t == null) return;
+        if (t % MS_DAY !== 0) hasTime = true;
+        events.push({ t, author: str(r && r.author), text: str(r && r.text),
+                      timestamp: r.timestamp, post: str(p && p.code) });
+      });
+    });
+    const gran = !o.granularity || o.granularity === 'auto'
+      ? (hasTime ? 'hour' : 'day') : o.granularity;
+    const step = gran === 'minute' ? MINUTE : gran === 'hour' ? HOUR : MS_DAY;
+    const counts = new Map();
+    events.forEach(e => { const b = Math.floor(e.t / step) * step; counts.set(b, (counts.get(b) || 0) + 1); });
+    const buckets = [...counts.entries()].sort((a, b) => a[0] - b[0]).map(([t, count]) => ({ t, count }));
+    const sensitivity = Number.isFinite(o.sensitivity) ? o.sensitivity : 3;
+    const bursts = detectBursts(buckets, sensitivity);
+    return { granularity: gran, stepMs: step, hasTime, buckets, bursts,
+             total: events.length, first: events.length ? Math.min(...events.map(e => e.t)) : null,
+             last: events.length ? Math.max(...events.map(e => e.t)) : null };
+  }
+  function bucketEvents(posts, t, opts) {
+    const o = opts || {};
+    const step = o.stepMs || MS_DAY;
+    const out = [];
+    (Array.isArray(posts) ? posts : []).forEach(p => {
+      (Array.isArray(p && p.replies) ? p.replies : []).forEach(r => {
+        const rt = parseDate(r && r.timestamp);
+        if (rt != null && Math.floor(rt / step) * step === t) {
+          out.push({ author: str(r && r.author), text: str(r && r.text),
+                     timestamp: r.timestamp, post: str(p && p.code) });
+        }
+      });
+    });
+    return out.sort((a, b) => cmp(a.author, b.author) || cmp(a.post, b.post));
+  }
+
+  /* Skor heuristic 0..100. Bukan bukti — hanya prioritias investigator. */
+  function buzzerScores(posts, opts) {
+    const o = opts || {};
+    const clusters = Array.isArray(o.clusters) ? o.clusters : [];
+    const st = new Map();
+    const S = id => {
+      if (!st.has(id)) st.set(id, { id, posts: 0, replies: 0, threads: 0,
+        targets: new Set(), texts: new Map(), days: new Set(), short: 0, cib: 0 });
+      return st.get(id);
+    };
+    (Array.isArray(posts) ? posts : []).forEach(p => {
+      const host = str(p && p.author).trim();
+      if (host) S(host).posts++;
+      (Array.isArray(p && p.thread) ? p.thread : []).forEach(t => {
+        const who = str(t && t.author || host).trim(); if (who) S(who).threads++;
+      });
+      (Array.isArray(p && p.replies) ? p.replies : []).forEach(r => {
+        const who = str(r && r.author).trim(); if (!who) return;
+        const s = S(who), text = str(r && r.text);
+        s.replies++;
+        if (host) s.targets.add(host);
+        const k = tokenKey(text);
+        s.texts.set(k, (s.texts.get(k) || 0) + 1);
+        const t = parseDate(r && r.timestamp);
+        if (t != null) s.days.add(Math.floor(t / MS_DAY));
+        if (normText(text).length < 12) s.short++;
+      });
+    });
+    clusters.forEach(c => (c.windowAuthors || []).forEach(id => { if (st.has(id)) S(id).cib++; }));
+
+    const out = [];
+    st.forEach(s => {
+      let score = 0;
+      const reasons = [];
+      const maxRepeat = s.texts.size ? Math.max(...s.texts.values()) : 0;
+      const rep = s.replies ? maxRepeat / s.replies : 0;
+      if (s.posts === 0 && s.replies >= 20) { score += 25; reasons.push('0 postingan tapi ' + s.replies + ' komentar'); }
+      else if (s.posts === 0 && s.replies >= 8) { score += 12; reasons.push('0 postingan, hanya berkomentar'); }
+      if (s.replies >= 5 && rep >= 0.5) { score += 25; reasons.push('teks berulang ' + Math.round(rep * 100) + '%'); }
+      else if (s.replies >= 5 && rep >= 0.3) { score += 12; reasons.push('teks agak berulang ' + Math.round(rep * 100) + '%'); }
+      if (s.replies >= 10 && s.targets.size === 1) { score += 20; reasons.push('hanya menargetkan 1 akun'); }
+      else if (s.replies >= 10 && s.targets.size <= 2) { score += 10; reasons.push('hanya menargetkan ' + s.targets.size + ' akun'); }
+      if (s.cib >= 2) { score += 20; reasons.push('terlibat ' + s.cib + ' klaster komentar identik'); }
+      else if (s.cib === 1) { score += 15; reasons.push('terlibat klaster komentar identik'); }
+      if (s.replies >= 5 && s.short / s.replies >= 0.8) { score += 10; reasons.push('komentar sangat pendek'); }
+      const rate = s.days.size ? s.replies / s.days.size : 0;
+      if (s.replies >= 10 && rate >= 30) { score += 10; reasons.push('±' + Math.round(rate) + ' komentar/hari aktif'); }
+      score = Math.max(0, Math.min(100, score));
+      out.push({ id: s.id, score, level: score >= 70 ? 'tinggi' : score >= 40 ? 'sedang' : 'rendah',
+        reasons, posts: s.posts, replies: s.replies, threads: s.threads,
+        targets: s.targets.size, repeatRatio: Math.round(rep * 100), cib: s.cib,
+        activeDays: s.days.size, ratePerDay: Math.round(rate) });
+    });
+    out.sort((a, b) => b.score - a.score || cmp(a.id, b.id));
+    return out;
+  }
+
   return {
     build, analyze, louvain, betweenness, closeness, eigenvector, degree,
-    parseDate, normalizeGraph, communitySizes, eid
+    parseDate, normalizeGraph, communitySizes, eid,
+    normText, textTokens, tokenKey, detectCIB, temporalBuckets, bucketEvents, buzzerScores
   };
 });
