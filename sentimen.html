@@ -16,7 +16,9 @@ header a:hover{text-decoration:underline}
 button,select,input[type="search"]{background:var(--card);color:var(--fg);border:1px solid var(--bd);border-radius:8px;padding:5px 9px;font:inherit;cursor:pointer}
 input[type="search"]{cursor:text;min-width:180px;flex:1;max-width:320px}
 #warn{background:var(--warn);color:#fff;padding:9px 14px;font-size:13px}
-#warn[hidden]{display:none}
+#warn[hidden],#progress[hidden]{display:none!important}
+#progress{padding:8px 14px;border-bottom:1px solid var(--bd);background:var(--card)}
+button:disabled{opacity:.5;cursor:not-allowed}
 .ctl{display:flex;flex-wrap:wrap;gap:10px;align-items:center;padding:8px 14px;border-bottom:1px solid var(--bd);font-size:12px;color:var(--mut)}
 .ctl label{display:inline-flex;align-items:center;gap:5px;color:var(--fg)}
 main{display:flex;align-items:flex-start;gap:14px;padding:14px;max-width:1400px;margin:0 auto}
@@ -70,9 +72,15 @@ footer{max-width:1400px;margin:0 auto;padding:0 14px 24px;color:var(--mut);font-
   <button id="bLlm" title="Muat llm_analysis.json manual">llm_analysis.json</button>
   <input id="fLlm" type="file" accept=".json" hidden style="display:none">
 </label>
+<button id="run" title="Jalankan analisis LLM lewat server lokal">▶ Jalankan analisis</button>
+<label class="tiny mut" title="0 = semua komentar">maks <input id="limit" type="number" min="0" step="20" value="0" style="width:74px"></label>
 <button id="csv" title="Unduh komentar berlabel (hasil filter)">Ekspor CSV</button>
 <span class="st" id="st">Memuat…</span>
 </header>
+<div id="progress" hidden>
+  <div class="tiny" id="pMsg">Menyiapkan…</div>
+  <div class="bar"><i id="pBar" style="background:var(--c1)"></i></div>
+</div>
 <div id="warn" hidden></div>
 <div class="ctl">
 <input id="q" type="search" placeholder="Cari teks / akun…">
@@ -270,6 +278,50 @@ $('#bLlm').onclick=()=>readFile($('#fLlm'),d=>{
   if(!setLlm(d)){warn('File itu bukan hasil analisis LLM yang dikenali.');return}
   clearWarn();fillSelects();render();
 });
+function setProgress(show,msg,pct){
+  $('#progress').hidden=!show;$('#run').disabled=!!show;
+  if(msg)$('#pMsg').textContent=msg;
+  $('#pBar').style.width=Math.max(0,Math.min(100,Number(pct)||0))+'%';
+}
+async function api(path,opt){
+  try{const r=await fetch(path,opt);let d=null;try{d=await r.json()}catch(e){}
+    return {ok:r.ok,status:r.status,data:d};
+  }catch(e){return {ok:false,status:0,data:null}}
+}
+async function loadResult(){
+  const d=await fetch('llm_analysis.json?t='+Date.now()).then(r=>r.ok?r.json():null).catch(()=>null);
+  if(!d||!setLlm(d))return false;
+  window.__llmRaw=d;clearWarn();fillSelects();render();return true;
+}
+let pollTimer=null;
+async function poll(){
+  clearTimeout(pollTimer);
+  const r=await api('/api/status');
+  if(!r.ok){setProgress(false);warn('Server analisis tidak merespons.');return}
+  const s=r.data||{};
+  if(s.running){
+    const pct=s.total?Math.round(s.done/s.total*100):0;
+    const detail=s.total?' · batch '+s.done+'/'+s.total+(s.labeled?' · '+s.labeled+' berlabel':''):'';
+    setProgress(true,(s.message||'Menganalisis')+detail,pct);
+    pollTimer=setTimeout(poll,2000);return;
+  }
+  setProgress(false);
+  if(s.error){warn('Analisis gagal: '+s.error);return}
+  if(!await loadResult())warn('Analisis selesai, tetapi hasil tidak bisa dibaca.');
+}
+$('#run').onclick=async()=>{
+  const limit=Math.max(0,Number($('#limit').value)||0);
+  setProgress(true,'Mengirim perintah analisis…',0);
+  const r=await api('/api/analyze',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({limit})});
+  if(!r.ok){
+    setProgress(false);
+    if(r.status===404||r.status===501)warn('Server analisis tidak tersedia. Jalankan ./run.sh serve lalu buka halaman ini di http://localhost:8000/sentimen.html.');
+    else warn((r.data&&r.data.message)||'Gagal memulai analisis.');
+    return;
+  }
+  clearWarn();poll();
+};
 Promise.all([
   fetch('data.json').then(r=>r.ok?r.json():null).catch(()=>null),
   fetch('llm_analysis.json').then(r=>r.ok?r.json():null).catch(()=>null)
@@ -277,9 +329,11 @@ Promise.all([
   window.__llmRaw=l||null;
   if(!d){warn('Gagal memuat data.json. Jalankan ./run.sh serve atau muat berkas manual lewat tombol di header.');$('#st').textContent='';return}
   setData(d);
-  if(!l||!setLlm(l)){
-    warn('Hasil analisis LLM belum tersedia. Jalankan .venv/bin/python llm_analyze.py lalu muat ulang halaman ini (atau muat llm_analysis.json manual).');
-  }else clearWarn();
+  if(l&&setLlm(l))clearWarn();
+  else warn('Hasil analisis LLM belum tersedia. Klik ▶ Jalankan analisis untuk memproses komentar, atau muat llm_analysis.json manual.');
   fillSelects();render();
+  api('/api/status').then(r=>{
+    if(r.ok&&r.data&&r.data.running){clearWarn();poll()}
+  });
 });
 </script></body></html>

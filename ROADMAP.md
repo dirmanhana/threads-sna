@@ -51,6 +51,7 @@ Checklist dari saran yang disetujui. Selesai semua pada sesi ini.
 - [x] Skrip batch `llm_analyze.py`: topik + keyword sekali, lalu label sentimen/emotion/toxicity/spam/topic per batch, retry + penulisan atomik
 - [x] `content_key` FNV-1a 64-bit identik di Python dan `SNA.contentKey` (browser) + paritas di test Python/Node
 - [x] Halaman mandiri `sentimen.html` (tidak dicampur ke viewer): label sentimen per komentar, emosi/topik/toksisitas/spam, filter + pencarian, pengurutan, ekspor CSV, ringkasan & kata kunci; viewer dikembalikan ke versi tanpa LLM
+- [x] Analisis bisa dipicu langsung dari halaman: `llm_server.py` (dipakai `./run.sh serve`) menyediakan `/api/analyze` + `/api/status`, menjalankan skrip di lokal dengan progres, kunci tetap di `.env` dan diblokir dari fetch statis
 - [x] Token LLM tidak dikirim ke browser; viewer dan halaman sentimen tetap jalan tanpa `llm_analysis.json` (dengan petunjuk)
 - [x] Test: 8 test Python baru (env/key/collect/parse/request) + 1 test Node (paritas kunci) → total 16 Python + 23 Node
 - [x] Verifikasi browser dengan hasil LLM sintetis: label per baris, filter, ekspor CSV, tanpa page error

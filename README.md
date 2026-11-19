@@ -76,16 +76,21 @@ Data lama (sebelum schema ini) bisa dimigrasi dengan `./run.sh migrate`. Backup 
 
 ## Analisis konten (LLM)
 
-Graf menjawab **siapa bicara dengan siapa**; bagian ini menjawab **apa yang mereka bicarakan** dan **bagaimana nadanya**. Analisis dijalankan sebagai skrip batch lokal, bukan di browser:
+Graf menjawab **siapa bicara dengan siapa**; bagian ini menjawab **apa yang mereka bicarakan** dan **bagaimana nadanya**. Analisis tetap dijalankan sebagai proses lokal (bukan di browser), tetapi bisa dipicu langsung dari halaman sentimen lewat server lokal kecil di `llm_server.py`:
 
 ```bash
 cp .env.example .env          # lalu isi LLM_API_KEY (dan base URL/model bila perlu)
-./run.sh analyze              # baca data.json -> tulis llm_analysis.json
+./run.sh serve                # buka http://localhost:8000/sentimen.html
+# lalu klik tombol ▶ Jalankan analisis di halaman tersebut
+
+./run.sh analyze              # alternatif lewat terminal: baca data.json -> llm_analysis.json
 ./run.sh analyze --limit 100  # hanya 100 komentar pertama (uji cepat)
 ./run.sh analyze --dry-run    # lihat rencana tanpa memanggil API
 ```
 
-- Kredensial dibaca dari `.env` oleh `llm_analyze.py` dan **tidak pernah dikirim ke browser**. Halaman analisis hanya memuat berkas hasil `llm_analysis.json` (gitignored); `viewer.html` tidak memuatnya sama sekali, sehingga peta jaringan tetap berfungsi normal walaupun analisis belum dijalankan.
+- Kredensial dibaca dari `.env` oleh `llm_analyze.py` dan **tidak pernah dikirim ke browser**. Tombol **▶ Jalankan analisis** hanya mengirim perintah (opsi `limit`, batch, timeout) ke `/api/analyze` pada server lokal; server yang menjalankan skrip dan menulis `llm_analysis.json` (gitignored). Server juga menyembunyikan `.env` dari `fetch` statis.
+- Progres batch ditampilkan di halaman lewat `/api/status` (file progres sementara `llm_progress.json`, gitignored). Analisis yang sudah berjalan—termasuk yang dipicu dari terminal—tidak bisa dijalankan dua kali bersamaan; halaman akan menampilkan statusnya.
+- `viewer.html` tidak memuat hasil LLM sama sekali, sehingga peta jaringan tetap berfungsi normal walaupun analisis belum dijalankan. Bila server analisis tidak tersedia (misal halaman dibuka dengan `python -m http.server` biasa), halaman sentimen tetap bisa menampilkan hasil lama atau memuat berkas manual.
 - Model/config: `LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL=cmd`, `LLM_BATCH_SIZE`, `LLM_TIMEOUT`, `LLM_MAX_TOKENS`. Nilai bawaan ada di `.env.example`. Model `cmd` di gateway ini adalah model *thinking*, jadi `LLM_MAX_TOKENS` perlu besar (≈8000); nilai kecil memotong JSON sebelum selesai.
 - Kunci tiap komentar memakai FNV-1a 64-bit yang identik di Python (`content_key`) dan browser (`SNA.contentKey`), jadi hasil LLM bisa dicocokkan dengan komentar di `data.json` secara sinkron tanpa menyimpan teks mentah di hasil analisis.
 - Topik dibuat sekali dari sampel teks terpanjang, lalu tiap batch komentar diberi label `sentiment` (positif/negatif/netral), `emotion`, `toxicity` (0–1), `spam`, dan `topic` dalam satu panggilan.

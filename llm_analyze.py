@@ -275,7 +275,7 @@ def analyze(cfg: dict, items: list[dict], batch_size: int, timeout: int,
             if i in result:
                 labels[it["key"]] = result[i]
         if on_progress:
-            on_progress(n, len(chunks))
+            on_progress(n, len(chunks), len(labels))
         elif n % 5 == 0 or n == len(chunks):
             print("  batch %d/%d" % (n, len(chunks)), file=sys.stderr)
 
@@ -310,6 +310,8 @@ def main(argv=None) -> int:
     ap.add_argument("--batch-size", type=int, default=0)
     ap.add_argument("--timeout", type=int, default=0)
     ap.add_argument("--no-topic", action="store_true")
+    ap.add_argument("--progress-file", default="",
+                    help="tulis progres batch ke file JSON (dipakai server lokal)")
     ap.add_argument("--dry-run", action="store_true", help="tampilkan rencana tanpa panggil API")
     a = ap.parse_args(argv)
 
@@ -334,7 +336,16 @@ def main(argv=None) -> int:
         return 1
     print("Menganalisis %d komentar dengan %s …" % (len(items), cfg.get("LLM_MODEL") or "cmd"),
           file=sys.stderr)
-    result = analyze(cfg, items, batch, timeout, with_topics=not a.no_topic)
+
+    def progress(n, total, labeled):
+        if a.progress_file:
+            Path(a.progress_file).write_text(
+                json.dumps({"done": n, "total": total, "labeled": labeled}), encoding="utf-8")
+        else:
+            print("  batch %d/%d" % (n, total), file=sys.stderr)
+
+    result = analyze(cfg, items, batch, timeout, with_topics=not a.no_topic,
+                     on_progress=progress if a.progress_file else None)
     out = Path(a.out)
     tmp = out.with_suffix(out.suffix + ".tmp")
     tmp.write_text(json.dumps(result, ensure_ascii=False, indent=1), encoding="utf-8")

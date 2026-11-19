@@ -10,4 +10,7 @@ failed.json
 .env.*
 !.env.example
 llm_analysis.json
+llm_analysis.json.tmp
+llm_progress.json
+llm_analysis.lock
 .DS_Store
