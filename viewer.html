@@ -1,0 +1,438 @@
+<!doctype html>
+<html lang="id"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Threads SNA Viewer</title>
+<style>
+:root{--bg:#fff;--fg:#1a1a1a;--mut:#6b6b6b;--card:#f4f4f2;--bd:#ddd;--c1:#378add;--c2:#d85a30;--c3:#1d9e75;--c4:#8f6fd0;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#1b1b1a;--fg:#eee;--mut:#a3a3a0;--card:#262624;--bd:#3a3a38}}
+:root[data-theme="dark"]{--bg:#1b1b1a;--fg:#eee;--mut:#a3a3a0;--card:#262624;--bd:#3a3a38}
+html,body{height:100%;margin:0}
+body{background:var(--bg);color:var(--fg);font:14px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif;display:flex;flex-direction:column}
+header{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:10px 14px;border-bottom:1px solid var(--bd)}
+header b{font-size:15px}.st{color:var(--mut);font-size:12px;margin-left:auto}
+button,label.btn,select,input[type="date"],input[type="range"]{background:var(--card);color:var(--fg);border:1px solid var(--bd);border-radius:8px;padding:5px 8px;cursor:pointer;font:inherit}
+.ctl{display:flex;flex-wrap:wrap;gap:12px;align-items:center;padding:7px 14px;border-bottom:1px solid var(--bd);font-size:12px;color:var(--mut)}
+.ctl label{display:inline-flex;align-items:center;gap:4px;color:var(--fg)}
+.ctl input[type="number"],.ctl input[type="date"]{font:inherit}
+main{flex:1;display:flex;min-height:0}
+#svg{flex:1;min-width:0;height:100%}
+aside{width:340px;max-width:45%;border-left:1px solid var(--bd);overflow:auto;padding:12px}
+@media(max-width:700px){main{flex-direction:column}aside{width:auto;max-width:none;height:45%;border-left:0;border-top:1px solid var(--bd)}}
+.card{background:var(--card);border-radius:8px;padding:8px 10px;margin:0 0 8px}
+.rp{border-left:3px solid var(--c1);padding:2px 0 2px 8px;margin:6px 0 0;color:var(--mut)}
+.rp.th{border-left-color:var(--c3)}
+.rp b,.card b{color:var(--fg)}.tag{font-size:11px;color:var(--mut)}
+.txt{display:-webkit-box;-webkit-line-clamp:6;-webkit-box-orient:vertical;overflow:hidden;white-space:pre-wrap;word-break:break-word}
+h4{margin:12px 0 6px;font-size:13px}.lg i{display:inline-block;width:14px;height:3px;margin:0 4px 3px 8px;vertical-align:middle}
+mark{background:#fac775;color:#1a1a1a;border-radius:2px}
+text{fill:var(--fg);font-size:11px;pointer-events:none}
+#warn{background:#8a2b1d;color:#fff;padding:8px 14px;font-size:13px}
+#tip{position:fixed;z-index:99;background:var(--card);color:var(--fg);border:1px solid var(--bd);border-radius:8px;padding:8px 10px;font-size:12px;line-height:1.5;box-shadow:0 4px 16px #0004;max-width:340px;pointer-events:none}
+.mt{border-collapse:collapse;width:100%;font-size:11px;table-layout:fixed}
+.mt th,.mt td{border:1px solid var(--bd);padding:3px 4px;text-align:left;vertical-align:top;word-break:break-word}
+.acts{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0}
+details.exp{position:relative}
+details.exp .menu{position:absolute;right:0;top:100%;z-index:20;background:var(--card);border:1px solid var(--bd);border-radius:8px;padding:8px;display:flex;flex-direction:column;gap:6px;min-width:132px;box-shadow:0 4px 16px #0003}
+</style></head><body>
+<header><b>Threads SNA</b>
+<input id="q" type="search" placeholder="Cari kata kunci / @akun…" style="flex:1;min-width:160px;max-width:320px;background:var(--card);color:var(--fg);border:1px solid var(--bd);border-radius:8px;padding:5px 10px;font:inherit">
+<label class="btn">Muat data.json<input id="f" type="file" accept=".json" hidden></label>
+<button id="rs">Reset pilihan</button>
+<button id="rz">Reset zoom</button>
+<select id="colorBy" title="Warna node"><option value="peran">Warna: Peran</option><option value="komunitas">Warna: Komunitas</option></select>
+<span class="lg"><i style="background:var(--c1)"></i>komentar<i style="background:var(--c2)"></i>mention<i style="background:var(--c4)"></i>co-comment</span>
+<details class="exp"><summary>Ekspor</summary><div class="menu">
+  <button id="exNode">CSV node</button><button id="exEdge">CSV edge</button>
+  <button id="exGml">GraphML</button><button id="exPng">PNG</button><button id="exSvg">SVG</button>
+</div></details>
+<span class="st" id="st"></span></header>
+<div id="warn" hidden></div>
+<div class="ctl">
+<label><input id="tyKom" type="checkbox" checked> komentar</label>
+<label><input id="tyMen" type="checkbox" checked> mention</label>
+<label><input id="tyCo" type="checkbox"> co-comment</label>
+<label>min derajat <input id="minDeg" type="range" min="0" max="20" step="1" value="1" style="width:100px"><b id="minDegVal">1</b></label>
+<label>dari <input id="dateFrom" type="date"></label>
+<label>sampai <input id="dateTo" type="date"></label>
+<label>akun <select id="actor"><option value="">— Pilih akun —</option></select></label>
+</div>
+<main><svg id="svg"></svg><aside id="pn"></aside></main>
+<div id="tip" hidden></div>
+<script src="vendor/d3.min.js"></script>
+<script>window.d3||document.write('<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.9.0/d3.min.js"><\/script>')</script>
+<script src="viewer_core.js"></script>
+<script>
+const SAMPLE={posts:[
+{code:"A1",author:"dirman",text:"Kenapa UMKM susah naik kelas? Menurutku soal pencatatan.",timestamp:"2026-10-01",likes:12,thread:[
+  {code:"A1-1",author:"dirman",text:"Lanjut: catat arus kas tiap hari"},{code:"A1-2",author:"dirman",text:"Lanjut: pakai aplikasi sederhana"}],replies:[
+  {author:"sari_toko",text:"Setuju kak, saya masih catat di buku",timestamp:"2026-10-02"},
+  {author:"budi.dev",text:"Bisa pakai bot WA @dirman",timestamp:"2026-10-02"},
+  {author:"rina_k",text:"@sari_toko coba deh",timestamp:"2026-10-03"}]},
+{code:"A2",author:"sari_toko",text:"Baru buka toko online, doakan ya",timestamp:"2026-10-04",likes:5,replies:[
+  {author:"dirman",text:"Sukses kak!"},{author:"rina_k",text:"Semangat"},{author:"budi.dev",text:"Mantap"}]},
+{code:"A3",author:"budi.dev",text:"Rust vs Go untuk backend kecil?",replies:[
+  {author:"dirman",text:"Go lebih cepat dipelajari"},{author:"andi99",text:"Rust kalau mau performa"}]}]};
+
+const $=s=>document.querySelector(s);
+const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const eid=v=>v&&typeof v==='object'?String(v.id==null?'':v.id):String(v==null?'':v);
+const fmt=v=>Number(v||0).toFixed(3);
+const cmp=(a,b)=>a<b?-1:a>b?1:0;
+
+const state={types:new Set(['komentar','mention']),minDeg:1,dateFrom:'',dateTo:''};
+let all=[],posts=[],sim,kw='',graph=null,metrics=null,focus=null,isolate=false,panelUser=null,zoom=null,colorBy='peran',tm;
+
+function showWarn(msg){const w=$('#warn');w.textContent=msg;w.hidden=false}
+function hideWarn(){$('#warn').hidden=true}
+
+const hl=s=>{const t=esc(s),k=kw.trim();if(!k)return t;
+  const re=new RegExp(k.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'),'gi');
+  return t.replace(re,m=>'<mark>'+m+'</mark>')};
+
+function buildActorList(){
+  const sel=$('#actor');if(!sel)return;
+  const g=SNA.build(all,{types:new Set(['komentar','mention']),minDeg:0});
+  const deg=new Map(g.nodes.map(n=>[n.id,n.deg]));
+  const ids=[...deg.keys()].sort((a,b)=>deg.get(b)-deg.get(a)||cmp(a,b));
+  sel.innerHTML='<option value="">— Pilih akun —</option>'+ids.map(id=>'<option value="'+esc(id)+'">@'+esc(id)+' ('+deg.get(id)+')</option>').join('');
+}
+function setActor(id){const s=$('#actor');if(s)s.value=id||''}
+
+function load(d){all=Array.isArray(d)?d:(d&&Array.isArray(d.posts)?d.posts:[]);buildActorList();apply()}
+function apply(){
+  const k=kw.trim().toLowerCase(),has=t=>String(t==null?'':t).toLowerCase().includes(k);
+  posts=!k?all:all.map(p=>{
+    if(has(p.text)||has(p.author))return p;
+    const rs=(p.replies||[]).filter(r=>has(r.text)||has(r.author));
+    if(rs.length)return {...p,replies:rs};
+    const th=(p.thread||[]).filter(t=>has(t.text)||has(t.author));
+    if(th.length)return {...p,thread:th};
+    return null;
+  }).filter(Boolean);
+  const prev=new Map((graph&&graph.nodes||[]).map(n=>[n.id,n]));
+  const g=SNA.build(posts,state);
+  g.nodes.forEach(n=>{const p=prev.get(n.id);if(p){n.x=p.x;n.y=p.y;n.vx=p.vx;n.vy=p.vy}});
+  graph=g;metrics=SNA.analyze(g);
+  redraw();panel();header();
+}
+function header(){
+  const np=posts.length,
+        nc=posts.reduce((a,p)=>a+((p.replies||[]).length),0),
+        nt=posts.reduce((a,p)=>a+((p.thread||[]).length),0),
+        na=graph?graph.nodes.length:0,
+        nl=graph?graph.links.length:0;
+  $('#st').textContent=np+' post · '+nc+' komentar · '+nt+' thread · '+na+' akun · '+nl+' relasi'+(kw.trim()?' · dari '+all.length+' post':'');
+}
+
+function visibleGraph(){
+  if(!isolate||!focus||!graph)return graph;
+  const ids=new Set([focus]);
+  graph.links.forEach(l=>{const s=eid(l.source),t=eid(l.target);if(s===focus)ids.add(t);if(t===focus)ids.add(s)});
+  return {nodes:graph.nodes.filter(n=>ids.has(n.id)),
+          links:graph.links.filter(l=>ids.has(eid(l.source))&&ids.has(eid(l.target)))};
+}
+function redraw(){draw(visibleGraph()||{nodes:[],links:[]})}
+
+function showTip(html,e){
+  const t=$('#tip');t.innerHTML=html;t.hidden=false;
+  const pad=14,w=t.offsetWidth||220,h=t.offsetHeight||90;
+  let x=e.clientX+pad,y=e.clientY+pad;
+  if(x+w>window.innerWidth-8)x=e.clientX-w-pad;
+  if(y+h>window.innerHeight-8)y=e.clientY-h-pad;
+  t.style.left=Math.max(4,x)+'px';t.style.top=Math.max(4,y)+'px';
+}
+function hideTip(){$('#tip').hidden=true}
+function showNodeTip(e,d){
+  const m=metrics||{communities:new Map(),betweenness:new Map(),closeness:new Map(),eigenvector:new Map()};
+  const c=m.communities.get(d.id);
+  showTip('<b>@'+esc(d.id)+'</b><br>'+
+    'Derajat: '+(d.deg||0)+' · Post: '+(d.posts||0)+' · Komentar: '+(d.replies||0)+' · Thread: '+(d.threadCount||0)+'<br>'+
+    'Komunitas: '+(c==null?'-':c)+'<br>'+
+    'Betweenness: '+fmt(m.betweenness.get(d.id))+' · Closeness: '+fmt(m.closeness.get(d.id))+' · Eigenvector: '+fmt(m.eigenvector.get(d.id)),e);
+}
+
+function colorOf(n){
+  if(colorBy==='komunitas'&&metrics){
+    const c=metrics.communities.get(n.id);
+    const sc=d3.schemeTableau10||d3.schemeCategory10;
+    return c==null?'var(--mut)':sc[c%sc.length];
+  }
+  return n.posts?'var(--c3)':'var(--mut)';
+}
+function draw(g){
+  const svg=d3.select('#svg');svg.selectAll('*').remove();if(sim)sim.stop();hideTip();
+  const node=svg.node(),W=node.clientWidth||800,H=node.clientHeight||600;
+  const col=t=>t==='mention'?'var(--c2)':t==='co-comment'?'var(--c4)':'var(--c1)';
+  svg.append('defs').append('marker').attr('id','ar').attr('viewBox','0 -4 8 8').attr('refX',18)
+    .attr('markerWidth',6).attr('markerHeight',6).attr('orient','auto')
+    .append('path').attr('d','M0,-4L8,0L0,4Z').attr('fill','context-stroke');
+  const root=svg.append('g');
+  zoom=d3.zoom().scaleExtent([.2,4]).on('zoom',e=>root.attr('transform',e.transform));
+  svg.on('.zoom',null);            // hindari penumpukan listener tiap kali redraw
+  svg.call(zoom);
+  const nb=new Set();
+  if(focus)g.links.forEach(l=>{
+    const s=eid(l.source),t=eid(l.target);
+    if(s===focus)nb.add(t);if(t===focus)nb.add(s);
+  });
+  const dim=id=>!!(focus&&!isolate&&id!==focus&&!nb.has(id));
+  const lop=l=>focus&&!isolate?((eid(l.source)===focus||eid(l.target)===focus)?0.6:0.12):0.6;
+  const r=d=>6+Math.sqrt(d.deg||0)*3.5;
+
+  const lk=root.append('g').attr('class','lnk').selectAll('line').data(g.links).join('line')
+    .attr('stroke',d=>col(d.type)).attr('stroke-opacity',lop)
+    .attr('stroke-width',d=>1+Math.min(Number(d.w)||1,8))
+    .attr('marker-end','url(#ar)').style('cursor','pointer')
+    .on('click',(e,d)=>{e.stopPropagation();panelUser=null;panel({link:d})})
+    .on('mousemove',(e,d)=>showTip('@'+esc(eid(d.source))+' → @'+esc(eid(d.target))+' ('+esc(d.type)+', '+(d.w||0)+'×)',e))
+    .on('mouseout',hideTip);
+
+  const nd=root.append('g').selectAll('g').data(g.nodes).join('g').style('cursor','pointer')
+    .attr('opacity',d=>dim(d.id)?0.12:1)
+    .on('click',(e,d)=>{e.stopPropagation();focus=d.id;isolate=false;panelUser=d.id;setActor(d.id);redraw();panel({user:d.id})})
+    .on('mousemove',showNodeTip).on('mouseout',hideTip)
+    .call(d3.drag()
+      .on('start',(e,d)=>{if(!e.active)sim.alphaTarget(.3).restart();d.fx=d.x;d.fy=d.y})
+      .on('drag',(e,d)=>{d.fx=e.x;d.fy=e.y})
+      .on('end',(e,d)=>{if(!e.active)sim.alphaTarget(0);d.fx=d.fy=null}));
+  nd.append('circle').attr('r',r).attr('fill',colorOf).attr('stroke','var(--bg)').attr('stroke-width',1.5);
+  nd.append('text').attr('dy',d=>-r(d)-3).attr('text-anchor','middle').text(d=>'@'+d.id);
+
+  sim=d3.forceSimulation(g.nodes)
+    .force('l',d3.forceLink(g.links).id(d=>d.id).distance(110))
+    .force('c',d3.forceManyBody().strength(-320))
+    .force('m',d3.forceCenter(W/2,H/2))
+    .force('x',d3.forceCollide().radius(d=>r(d)+8))
+    .on('tick',()=>{
+      lk.attr('x1',d=>d.source.x).attr('y1',d=>d.source.y)
+        .attr('x2',d=>d.target.x).attr('y2',d=>d.target.y);
+      nd.attr('transform',d=>'translate('+d.x+','+d.y+')');
+    });
+}
+
+function postCard(p,only){
+  const txt=String(p.text==null?'':p.text);
+  const badges=[p.timestamp?'<span class="tag">🗓 '+esc(p.timestamp)+'</span>':'',
+                Number.isFinite(p.likes)?'<span class="tag">♥ '+p.likes+'</span>':''].join(' ');
+  const th=(p.thread||[]).filter(t=>!only||t.author===only).map(t=>
+    '<div class="rp th"><span class="tag">thread</span> <b>@'+esc(t.author)+'</b>: '+hl(t.text)+
+    (t.timestamp?' <span class="tag">'+esc(t.timestamp)+'</span>':'')+'</div>').join('');
+  const rp=(p.replies||[]).filter(r=>!only||r.author===only).map(r=>
+    '<div class="rp"><span class="tag">komentar</span> <b>@'+esc(r.author)+'</b>: '+hl(r.text)+
+    (r.timestamp?' <span class="tag">'+esc(r.timestamp)+'</span>':'')+'</div>').join('');
+  return '<div class="card"><b>@'+esc(p.author)+'</b> <span class="tag">'+
+    (only?'(dikomentari @'+esc(only)+')':'memposting')+'</span> '+badges+
+    '<div class="txt" title="'+esc(txt)+'">'+hl(txt)+'</div>'+th+rp+'</div>';
+}
+function metricTable(){
+  const m=metrics||{degree:new Map(),betweenness:new Map(),closeness:new Map(),eigenvector:new Map()};
+  const defs=[['degree',m.degree,false],['betweenness',m.betweenness,true],
+              ['closeness',m.closeness,true],['eigenvector',m.eigenvector,true]];
+  const rows=defs.map(([name,map,f3])=>{
+    const top=[...map.entries()].sort((a,b)=>b[1]-a[1]||cmp(String(a[0]),String(b[0]))).slice(0,5);
+    let cells='';
+    for(let i=0;i<5;i++)cells+='<td>'+(top[i]?'@'+esc(top[i][0])+' <span class="tag">'+(f3?fmt(top[i][1]):top[i][1])+'</span>':'-')+'</td>';
+    return '<tr><th>'+name+'</th>'+cells+'</tr>';
+  }).join('');
+  return '<h4>Metrik jaringan</h4><table class="mt"><tr><th>Metrik</th><th>1</th><th>2</th><th>3</th><th>4</th><th>5</th></tr>'+rows+'</table>';
+}
+function actorTop(){
+  const ns=(graph&&graph.nodes)||[];
+  const top=[...ns].sort((a,b)=>b.deg-a.deg||cmp(a.id,b.id)).slice(0,5);
+  return '<h4>Aktor teratas</h4>'+(top.length?top.map(n=>
+    '<div class="tag">@'+esc(n.id)+' · '+n.deg+' relasi · '+n.posts+' post · '+n.replies+' komentar · '+n.threadCount+' thread</div>').join(''):'<div class="tag">-</div>');
+}
+function communityBlock(){
+  const sizes=SNA.communitySizes(metrics&&metrics.communities);
+  const top=[...sizes.entries()].sort((a,b)=>b[1]-a[1]||a[0]-b[0]);
+  return '<h4>Komunitas</h4><div class="tag">'+sizes.size+' komunitas</div>'+
+    top.slice(0,5).map(([k,v])=>'<div class="tag">Komunitas '+k+': '+v+' akun</div>').join('');
+}
+function bindPanel(){
+  const f=$('#pFocus'),u=$('#pUnfocus'),i=$('#pIso');
+  if(f)f.onclick=()=>{if(panelUser){focus=panelUser;isolate=false;setActor(focus);redraw();panel({user:focus})}};
+  if(u)u.onclick=()=>{focus=null;isolate=false;setActor('');redraw();panel()};
+  if(i)i.onclick=()=>{if(!panelUser)return;focus=panelUser;isolate=!isolate;setActor(focus);redraw();panel({user:panelUser})};
+}
+function panel(o={}){
+  const el=$('#pn');hideTip();
+  if(o.link){
+    const l=o.link,items=(l.items&&l.items.length?l.items:[{}]);
+    panelUser=null;
+    el.innerHTML='<h4>@'+esc(eid(l.source))+' → @'+esc(eid(l.target))+' <span class="tag">'+esc(l.type)+', '+(l.w||0)+'×</span></h4>'+
+      items.map(it=>'<div class="card"><div>'+hl(it.text)+'</div><div class="tag">'+esc(it.author)+
+        ' · '+esc(it.postCode)+(it.timestamp?' · '+esc(it.timestamp):'')+'</div></div>').join('');
+    return;
+  }
+  if(o.user){
+    const u=o.user;panelUser=u;
+    const mine=posts.filter(p=>p.author===u);
+    const other=posts.filter(p=>p.author!==u&&((p.replies||[]).some(r=>r.author===u)||(p.thread||[]).some(t=>t.author===u)));
+    const m=metrics||{degree:new Map(),betweenness:new Map(),closeness:new Map(),eigenvector:new Map(),communities:new Map()};
+    const c=m.communities.get(u);
+    el.innerHTML='<h4>@'+esc(u)+'</h4><div class="tag">Derajat '+(m.degree.get(u)||0)+
+      ' · komunitas '+(c==null?'-':c)+' · betweenness '+fmt(m.betweenness.get(u))+
+      ' · closeness '+fmt(m.closeness.get(u))+' · eigenvector '+fmt(m.eigenvector.get(u))+'</div>'+
+      '<div class="acts"><button id="pFocus">Fokus</button><button id="pUnfocus">Lepaskan fokus</button>'+
+      '<button id="pIso">'+(isolate?'Tampilkan semua':'Isolasi')+'</button></div>'+
+      (mine.length?'<h4>Postingan</h4>'+mine.map(p=>postCard(p)).join(''):'')+
+      (other.length?'<h4>Dikomentari</h4>'+other.map(p=>postCard(p,u)).join(''):'');
+    bindPanel();return;
+  }
+  panelUser=null;
+  el.innerHTML=metricTable()+actorTop()+communityBlock()+'<h4>Semua postingan</h4>'+posts.map(p=>postCard(p)).join('');
+}
+
+function zoomTo(id){
+  const n=(graph&&graph.nodes||[]).find(x=>x.id===id);
+  if(!n||!zoom)return;
+  const el=$('#svg'),W=el.clientWidth||800,H=el.clientHeight||600;
+  const k=Math.max(1.2,d3.zoomTransform(el).k||1);
+  const tr=d3.zoomIdentity.translate(W/2-k*(n.x||0),H/2-k*(n.y||0)).scale(k);
+  d3.select(el).transition().duration(450).call(zoom.transform,tr);
+}
+function toggleType(t,on){on?state.types.add(t):state.types.delete(t);apply()}
+
+/* ---------- ekspor ---------- */
+function download(blob,name){
+  try{
+    const u=URL.createObjectURL(blob),a=document.createElement('a');
+    a.href=u;a.download=name;document.body.appendChild(a);a.click();a.remove();
+    setTimeout(()=>URL.revokeObjectURL(u),1000);
+  }catch(err){showWarn('Gagal mengunduh: '+(err&&err.message||err))}
+}
+const csv=v=>'"'+String(v==null?'':v).replace(/"/g,'""')+'"';
+function exportNodes(){
+  const g=visibleGraph()||{nodes:[],links:[]};
+  const rows=[['id','posts','replies','deg','threadCount','community'].map(csv).join(',')];
+  g.nodes.forEach(n=>rows.push([n.id,n.posts,n.replies,n.deg,n.threadCount,
+    metrics&&metrics.communities.get(n.id)].map(csv).join(',')));
+  download(new Blob(['\uFEFF'+rows.join('\r\n')],{type:'text/csv;charset=utf-8'}),'sna-nodes.csv');
+}
+function exportEdges(){
+  const g=visibleGraph()||{nodes:[],links:[]};
+  const rows=[['source','target','type','w','item_text','item_timestamp','item_postCode','item_author'].map(csv).join(',')];
+  g.links.forEach(l=>{
+    const its=(l.items&&l.items.length?l.items:[{}]);
+    its.forEach(it=>rows.push([eid(l.source),eid(l.target),l.type,l.w,
+      it.text,it.timestamp,it.postCode,it.author].map(csv).join(',')));
+  });
+  download(new Blob(['\uFEFF'+rows.join('\r\n')],{type:'text/csv;charset=utf-8'}),'sna-edges.csv');
+}
+const xe=s=>String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;')
+  .replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&apos;');
+function graphML(){
+  const g=visibleGraph()||{nodes:[],links:[]};
+  const keys=[['posts','node','int'],['replies','node','int'],['deg','node','int'],
+    ['threadCount','node','int'],['community','node','int'],['type','edge','string'],['w','edge','double']];
+  const out=['<?xml version="1.0" encoding="UTF-8"?>','<graphml xmlns="http://graphml.graphdrawing.org/xmlns">'];
+  keys.forEach(k=>out.push('<key id="'+k[0]+'" for="'+k[1]+'" attr.name="'+k[0]+'" attr.type="'+k[2]+'"/>'));
+  out.push('<graph edgedefault="undirected">');
+  g.nodes.forEach(n=>{
+    const c=metrics&&metrics.communities.get(n.id);
+    out.push('<node id="'+xe(n.id)+'"><data key="posts">'+(+n.posts||0)+'</data>'+
+      '<data key="replies">'+(+n.replies||0)+'</data><data key="deg">'+(+n.deg||0)+'</data>'+
+      '<data key="threadCount">'+(+n.threadCount||0)+'</data><data key="community">'+(c==null?-1:+c)+'</data></node>');
+  });
+  g.links.forEach((l,i)=>{
+    out.push('<edge id="e'+i+'" source="'+xe(eid(l.source))+'" target="'+xe(eid(l.target))+'">'+
+      '<data key="type">'+xe(l.type)+'</data><data key="w">'+(Number(l.w)||0)+'</data></edge>');
+  });
+  out.push('</graph></graphml>');
+  return out.join('\n');
+}
+function svgForExport(){
+  const src=$('#svg'),clone=src.cloneNode(true);
+  const W=src.clientWidth||960,H=src.clientHeight||600;
+  clone.setAttribute('xmlns','http://www.w3.org/2000/svg');
+  clone.setAttribute('width',W);clone.setAttribute('height',H);
+  clone.setAttribute('viewBox','0 0 '+W+' '+H);
+  const cs=getComputedStyle(document.documentElement);
+  const get=v=>{const x=cs.getPropertyValue(v).trim();
+    return x||({'--c1':'#378add','--c2':'#d85a30','--c3':'#1d9e75','--c4':'#8f6fd0','--fg':'#1a1a1a','--mut':'#6b6b6b'}[v]||'#888')};
+  clone.querySelectorAll('*').forEach(el=>{
+    ['fill','stroke'].forEach(a=>{
+      const v=el.getAttribute(a);if(!v)return;
+      if(v==='context-stroke')el.setAttribute(a,get('--c1'));
+      else if(v.indexOf('var(--')===0)el.setAttribute(a,get(v.slice(4,-1).trim()));
+    });
+  });
+  const st=document.createElementNS('http://www.w3.org/2000/svg','style');
+  st.textContent='text{fill:'+get('--fg')+';font-size:11px;font-family:system-ui,sans-serif}';
+  clone.insertBefore(st,clone.firstChild);
+  return {clone,W,H};
+}
+function exportSVG(){
+  try{
+    const c=svgForExport().clone;
+    download(new Blob([new XMLSerializer().serializeToString(c)],{type:'image/svg+xml;charset=utf-8'}),'sna.svg');
+  }catch(err){showWarn('Gagal mengekspor SVG: '+(err&&err.message||err))}
+}
+function exportPNG(){
+  try{
+    const {clone,W,H}=svgForExport();
+    const url=URL.createObjectURL(new Blob([new XMLSerializer().serializeToString(clone)],{type:'image/svg+xml;charset=utf-8'}));
+    const img=new Image();
+    img.onload=()=>{
+      try{
+        const cv=document.createElement('canvas'),scale=2;
+        cv.width=W*scale;cv.height=H*scale;
+        const ctx=cv.getContext('2d');ctx.scale(scale,scale);ctx.drawImage(img,0,0,W,H);
+        cv.toBlob(b=>{if(b)download(b,'sna.png');else showWarn('Gagal membuat PNG.')},'image/png');
+      }catch(err){showWarn('Gagal mengekspor PNG: '+(err&&err.message||err))}
+      finally{URL.revokeObjectURL(url)}
+    };
+    img.onerror=()=>{URL.revokeObjectURL(url);showWarn('Gagal memuat SVG untuk PNG.')};
+    img.src=url;
+  }catch(err){showWarn('Gagal mengekspor PNG: '+(err&&err.message||err))}
+}
+
+function bindControls(){
+  $('#tyKom').onchange=e=>toggleType('komentar',e.target.checked);
+  $('#tyMen').onchange=e=>toggleType('mention',e.target.checked);
+  $('#tyCo').onchange=e=>toggleType('co-comment',e.target.checked);
+  $('#minDeg').oninput=e=>{state.minDeg=Number(e.target.value)||0;$('#minDegVal').textContent=e.target.value;apply()};
+  $('#dateFrom').onchange=e=>{state.dateFrom=e.target.value;apply()};
+  $('#dateTo').onchange=e=>{state.dateTo=e.target.value;apply()};
+  $('#colorBy').onchange=e=>{colorBy=e.target.value;redraw();panel()};
+  $('#actor').onchange=e=>{
+    const id=e.target.value;
+    if(!id){focus=null;isolate=false;redraw();panel();return}
+    focus=id;isolate=false;redraw();panel({user:id});zoomTo(id);
+  };
+  $('#rz').onclick=()=>{if(zoom)d3.select('#svg').transition().duration(350).call(zoom.transform,d3.zoomIdentity)};
+  $('#rs').onclick=()=>{focus=null;isolate=false;setActor('');$('#pn').innerHTML='';redraw();panel()};
+  $('#q').oninput=e=>{clearTimeout(tm);tm=setTimeout(()=>{kw=e.target.value;apply()},250)};
+  $('#f').onchange=e=>{
+    const f=e.target.files&&e.target.files[0];if(!f)return;
+    const r=new FileReader();
+    r.onload=()=>{
+      let d;
+      try{d=JSON.parse(r.result.replace(/^\uFEFF/,''))}
+      catch(x){showWarn('File JSON tidak valid — data tidak diubah.');return}
+      try{load(d);hideWarn()}
+      catch(x){showWarn('JSON terbaca, tetapi gagal dirender: '+(x&&x.message||x))}
+    };
+    r.onerror=()=>showWarn('Gagal membaca file — data tidak diubah.');
+    r.readAsText(f);e.target.value='';
+  };
+  $('#exNode').onclick=exportNodes;$('#exEdge').onclick=exportEdges;
+  $('#exGml').onclick=()=>{try{download(new Blob([graphML()],{type:'application/graphml+xml;charset=utf-8'}),'sna.graphml')}
+                           catch(err){showWarn('Gagal mengekspor GraphML: '+(err&&err.message||err))}};
+  $('#exSvg').onclick=exportSVG;$('#exPng').onclick=exportPNG;
+}
+
+bindControls();hideWarn();
+try{load(SAMPLE)}catch(x){showWarn('Gagal menampilkan data contoh: '+(x&&x.message||x))}
+fetch('data.json')
+  .then(r=>{if(!r.ok)throw new Error('HTTP '+r.status);return r.json()})
+  .then(d=>{
+    try{load(d);hideWarn()}
+    catch(x){showWarn('data.json terbaca, tetapi gagal dirender: '+(x&&x.message||x))}
+  })
+  .catch(err=>{
+    showWarn('Gagal memuat data.json ('+(err&&err.message||err)+') — menampilkan data contoh. '
+      +'Buka lewat ./run.sh serve agar fetch lokal diizinkan.');
+    try{load(SAMPLE)}catch(x){showWarn('Gagal menampilkan data contoh: '+(x&&x.message||x))}
+  });
+</script></body></html>

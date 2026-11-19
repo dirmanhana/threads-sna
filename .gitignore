@@ -1,0 +1,9 @@
+.venv/
+threads_profile/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+data.json
+data.json.bak
+failed.json
+.DS_Store
