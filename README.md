@@ -20,6 +20,7 @@ Untuk fitur analisis konten berbasis LLM, salin `.env.example` menjadi `.env` la
 ./run.sh profile akun_target 10             # atau ambil dari satu profil
 ./run.sh post https://www.threads.com/@akun/post/XXXX
 ./run.sh serve                              # buka http://localhost:8000/viewer.html
+                                            # analisis sentimen: http://localhost:8000/sentimen.html
 ./run.sh migrate                            # migrasi data.json lama ke schema baru
 ./run.sh analyze                            # analisis konten via LLM -> llm_analysis.json
 ./run.sh analyze --limit 100 --dry-run      # cek rencana tanpa panggil API
@@ -84,23 +85,25 @@ cp .env.example .env          # lalu isi LLM_API_KEY (dan base URL/model bila pe
 ./run.sh analyze --dry-run    # lihat rencana tanpa memanggil API
 ```
 
-- Kredensial dibaca dari `.env` oleh `llm_analyze.py` dan **tidak pernah dikirim ke browser**. Viewer hanya memuat berkas hasil `llm_analysis.json` (gitignored), sehingga tetap berfungsi normal walaupun berkas itu belum ada atau gagal dibuat.
+- Kredensial dibaca dari `.env` oleh `llm_analyze.py` dan **tidak pernah dikirim ke browser**. Halaman analisis hanya memuat berkas hasil `llm_analysis.json` (gitignored); `viewer.html` tidak memuatnya sama sekali, sehingga peta jaringan tetap berfungsi normal walaupun analisis belum dijalankan.
 - Model/config: `LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL=cmd`, `LLM_BATCH_SIZE`, `LLM_TIMEOUT`, `LLM_MAX_TOKENS`. Nilai bawaan ada di `.env.example`. Model `cmd` di gateway ini adalah model *thinking*, jadi `LLM_MAX_TOKENS` perlu besar (≈8000); nilai kecil memotong JSON sebelum selesai.
 - Kunci tiap komentar memakai FNV-1a 64-bit yang identik di Python (`content_key`) dan browser (`SNA.contentKey`), jadi hasil LLM bisa dicocokkan dengan komentar di `data.json` secara sinkron tanpa menyimpan teks mentah di hasil analisis.
 - Topik dibuat sekali dari sampel teks terpanjang, lalu tiap batch komentar diberi label `sentiment` (positif/negatif/netral), `emotion`, `toxicity` (0–1), `spam`, dan `topic` dalam satu panggilan.
 
-Di viewer, hasil LLM otomatis dipakai bila tersedia:
+### Halaman sentimen (terpisah dari viewer)
 
-- **Warna: Sentimen** pada node (mayoritas komentar per akun) dan **Edge: Sentimen** pada garis interaksi (netto positif − negatif dari komentar yang melibatkan kedua akun). Berguna melihat akun pusat yang diserang (banyak merah) atau didukung (banyak hijau).
-- **📊 Konten** / tombol **Analisis konten** di panel: distribusi sentimen & emosi, daftar topik beserta kata kunci, *word cloud*, top n-gram, dan contoh komentar dengan toksisitas/spam tertinggi untuk ditinjau. Panel akun dan komunitas juga menampilkan ringkasan konten mereka.
-- Filter **sentimen** dan checkbox **sembunyikan toksik/spam** menyaring komentar lalu menggambar ulang graf dan metrik.
-- Ringkasan sentimen, jumlah topik, toksik, dan spam ikut tercetak di laporan PNG/SVG.
+Buka `http://localhost:8000/sentimen.html` setelah menjalankan `./run.sh serve`. Halaman ini **tidak dijadikan satu dengan viewer** dan menampilkan:
+
+- **Label sentimen per komentar** — setiap baris daftar memuat badge **＋ Positif / － Negatif / ＝ Netral**, emosi, topik, skor toksisitas, dan penanda spam, lengkap dengan teks asli, akun, postingan asal, waktu, serta alasan singkat dari model.
+- Ringkasan agregat (jumlah dan persentase positif/netral/negatif, toksik, spam) dan daftar topik beserta kata kuncinya.
+- Filter sentimen, emosi, topik, toksisitas/spam, dan pencarian teks/akun; pengurutan terbaru/terlama/toksisitas/akun; **Ekspor CSV** untuk hasil filter.
+- Kata kunci yang disorot di teks komentar dan tombol memuat `data.json` / `llm_analysis.json` manual bila halaman dibuka tanpa server.
 
 **Catatan**: label LLM (sentimen, emosi, toksisitas, spam) adalah bantuan triase, **bukan penilaian final**. Selalu verifikasi manual komentar yang ditandai, terutama sarkasme dan tuduhan. Akurasi sangat bergantung pada kualitas teks hasil scrape dan perilaku model; simpan hasil dengan `generated_at`/`model` untuk audit.
 
 ## Pemecahan masalah
 
-- Banner **"Gagal memuat data.json (Failed to fetch)"** →viewer dibuka langsung dengan `file://`. Browser memblokir `fetch` lokal; jalankan `./run.sh serve` lalu buka `http://localhost:8000/viewer.html`.
+- Banner **"Gagal memuat data.json (Failed to fetch)"** → halaman dibuka langsung dengan `file://`. Browser memblokir `fetch` lokal; jalankan `./run.sh serve` lalu buka `http://localhost:8000/viewer.html` atau `http://localhost:8000/sentimen.html`. Di halaman sentimen, berkas juga bisa dimuat manual lewat tombol di header.
 - Banner **"File JSON tidak valid"** → file yang dipilih benar-benar bukan JSON. Pilih `data.json` yang dihasilkan scraper (bukan `data.json.bak`), atau cek cepat dengan `node -e "JSON.parse(require('fs').readFileSync('data.json','utf8'))"`.
 - Banner **"data.json terbaca, tetapi gagal dirender: …"** → JSON valid tapi ada error saat menggambar graf (mis. selector/field berubah). Pesan ini sengaja dibedakan dari error JSON agar mudah didiagnosis.
 
