@@ -232,7 +232,7 @@ const GraphCanvas = forwardRef(function GraphCanvas(props, ref) {
       <div
         ref={tipEl}
         style={{ display: 'none', position: 'fixed', zIndex: 999, maxWidth: 340, pointerEvents: 'none' }}
-        className="rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-xs leading-relaxed text-slate-700 shadow-xl dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+        className="rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-xs leading-relaxed text-slate-700 shadow-xl dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
       />
     </>
   );

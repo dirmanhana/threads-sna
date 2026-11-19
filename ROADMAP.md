@@ -132,6 +132,15 @@ Checklist dari saran yang disetujui. Selesai semua pada sesi ini.
 - [x] Tes: `tests/test_projects.py` (5 test) + `tests/test_scrape_api.py` dialihkan ke direktori proyek sementara; 41 test Python + 23 test Node lulus; Playwright 15 pemeriksaan (Ringkasan/Peta/Sentimen/Pengumpulan Data, buat→buka→hapus proyek lewat browser) lulus.
 - [x] Penyimpanan tetap JSON (bukan SQLite) — data masih kecil; `projects.py` menjadi satu-satunya lapisan bila nanti perlu pindah.
 
+## Restrukturisasi UI gaya NusaPulse (selesai)
+- [x] Shell SPA bertab tunggal (Ringkasan / Peta Jaringan / Sentimen / Sumber & Proyek) ala NusaPulse: palet slate/biru, font Plus Jakarta Sans/DM Sans/JetBrains Mono, sidebar 248 px dengan proyek dropdown & nav 4 tab, header breadcrumb + pencarian + aksi **Analisis AI**, konten `max-w-[1440px]` (`src/App.jsx`, `src/components/Layout.jsx`, `index.html`, `src/index.css`).
+- [x] Ringkasan: KPI, tren volume, proporsi sentimen, aktor utama, topik dominan, deteksi CIB, dan panel **Ringkasan AI** (narasi ringkas sisi klien dari statistik; label per komentar tetap lewat `/api/analyze`).
+- [x] Peta Jaringan: toolbar/filter, graf D3, rail info bertab, timeline & replay, ekspor, dan fokus akun dipertahankan; kompatibel dengan deep-link `/viewer.html?focus=<akun>` (membuka tab Peta Jaringan dan fokus akun).
+- [x] Sentimen: KPI, feed berfilter + CSV, sidebar proporsi/topik/kata kunci/info dataset.
+- [x] Sumber & Proyek: ingesti & progres, manajemen proyek, dan **Impor & Cadangkan Dataset JSON** (unduh `data.json`/`llm_analysis.json` per proyek). Impor tulis ke server tidak ditambahkan (muat lokal via Peta Jaringan / salin ke `projects/<slug>/` saat server mati). Fitur Live Stream/simulasi dan "Uji Klasifikasi" tidak disertakan.
+- [x] Komponen pendukung (`Card`, `KpiCard`, `StatusPill`, `EmptyState`, `MiniCharts`, `InfoPanel`, `Timeline`, `GlobalSearch`, `GraphCanvas`, dll.) diadaptasi ke gaya baru; backend (`llm_server.py`, `projects.py`, `viewer_core.js`) tidak diubah. Atribusi Mosaic Lite (GPL-3.0) dipertahankan; pola NusaPulse dire-implementasi (tanpa salin kode, template tanpa lisensi).
+- [x] `npm run build` OK; 41 test Python + 23 test Node lulus; verifikasi Playwright (4 tab + deep-link `/viewer.html?focus=0jenry1&project=default`) lulus tanpa page error console.
+
 ## Roadmap perbaikan berikutnya
 
 Diurutkan berdasarkan prioritas. Nomor mengikuti paket saran scraping sebelumnya (1, 2, 4, 5 sudah selesai).

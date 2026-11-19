@@ -143,19 +143,21 @@ Data lama (sebelum schema ini) bisa dimigrasi dengan `./run.sh migrate`. Backup 
 
 ## Tampilan dashboard (React + Tailwind)
 
-Ketiga halaman sekarang adalah satu aplikasi React + Vite + Tailwind CSS v4 yang dibangun ke `dist/`. Tata letaknya mengikuti kerangka **Mosaic Lite** (sidebar bergrup, header 64 px, judul halaman 30 px, grid 12 kolom, kartu `rounded-xl`):
+Aplikasi adalah SPA React + Vite + Tailwind CSS v4 yang dibangun ke `dist/` dengan satu shell bertab (gaya visual terinspirasi template *NusaPulse — Social Media Monitoring & SNA*, dire-implementasi; komponen UI dasar tetap diadaptasi dari [Mosaic Lite](https://github.com/cruip/tailwind-dashboard-template), GPL-3.0). Palet slate/biru, font Plus Jakarta Sans/DM Sans/JetBrains Mono, sidebar 248 px, header dengan breadcrumb · pencarian · aksi utama, konten `max-w-[1440px]`.
 
-- `src/pages/SummaryPage.jsx` — **Ringkasan** (beranda `/`): KPI postingan/komentar/akun/relasi, grafik volume komentar, donut sentimen, tabel aktor teratas, aktivitas terakhir, sinyal risiko (toksik/spam/lonjakan), dan topik LLM.
-- `src/pages/ViewerPage.jsx` — peta jaringan + semua fitur viewer di atas (D3 force graph, filter, panel, time-lapse, anomali, timeline, ekspor).
-- `src/pages/SentimentPage.jsx` — halaman label sentimen per komentar.
-- `src/pages/ScrapePage.jsx` — pengumpulan data: login, form scraping, progres, dan ringkasan `data.json`.
-- `src/components/` — `Layout` (sidebar/header/pencarian global), `PageHeader`, `Card`, `KpiCard`, `StatusPill`, `EmptyState`, `MiniCharts` (bar/donut tanpa Chart.js), kanvas graf, timeline, dan panel informasi bertab.
-- `src/lib/` — helper murni, utilitas fetch/unduh, dan modul ekspor; `viewer_core.js` tetap dipakai apa adanya supaya test Node tidak berubah.
-- `src/App.jsx` memilih halaman dari `pathname`: `/sentimen.html` → sentimen, `/scrape.html` → pengumpulan data, `/viewer.html` → peta, selain itu (`/`, `/ringkasan.html`, `/index.html`) → Ringkasan.
+Tab utama:
+- **Ringkasan** — KPI postingan/komentar/aktor/relasi, tren volume, proporsi sentimen, aktor utama, topik dominan, deteksi CIB, dan panel **Ringkasan AI** (narasi ringkas sisi klien dari statistik proyek; bukan hasil analisis per komentar).
+- **Peta Jaringan** — semua fitur viewer (D3 force graph, filter, fokus/isolasi, time-lapse, anomali/CIB/buzzer, timeline, ekspor, toolbar, rail info). Kompatibel dengan deep-link lama `/viewer.html?focus=<akun>` (membuka tab Peta Jaringan dan memfokuskan akun).
+- **Sentimen** — feed label per komentar (sentimen/emosi/topik/toksisitas/spam), filter/pencarian/urut/ekspor CSV, serta sidebar proporsi, topik, kata kunci, dan info dataset.
+- **Sumber & Proyek** — ingesti & pengumpulan data (login, scraping, progres), manajemen proyek pemantauan, dan **Impor & Cadangkan Dataset JSON** (unduh `data.json` dan `llm_analysis.json` per proyek).
 
-Header memuat **pencarian global** akun/postingan; memilih hasil membuka `/viewer.html?focus=<akun>` dan langsung memfokuskan akun itu. Toggle tema ada di header, dan sidebar bisa diringkas (80 px) atau dilebarkan (256 px).
+Struktur kode: `src/App.jsx` (shell/routing tab via path + `?tab=`), `src/components/Layout.jsx` (sidebar/header, pemilih proyek, toggle tema, aksi **Analisis AI**), `src/pages/{SummaryPage,ViewerPage,SentimentPage,ScrapePage}.jsx` sebagai view per tab, komponen pendukung di `src/components/`, utilitas di `src/lib/`. `viewer_core.js` tetap dipakai apa adanya (UMD) agar test Node tidak berubah.
+
+Header memuat **pencarian global** akun/postingan, pemilih proyek, dan tombol **Analisis AI** (menjalankan `POST /api/analyze` untuk proyek aktif dan memantau `/api/status`; label AI tetap triase, bukan bukti). Memilih hasil pencarian membuka Peta Jaringan dan memfokuskan akun (`/viewer.html?focus=<akun>`). Toggle tema gelap/terang ada di sidebar.
 
 `llm_server.py` menyajikan `dist/` bila sudah dibangun: `/`, `/index.html`, `/ringkasan.html`, `/viewer.html`, `/sentimen.html`, dan `/scrape.html` memuat `index.html` yang sama, aset dari `/assets/`, sementara `data.json` dan `llm_analysis.json` per proyek disajikan dari `projects/<slug>/` (hanya dua nama berkas itu yang boleh diakses, dan hanya dari folder proyek yang valid). Sebelum `npm run build`, server fallback ke file HTML lama. `node_modules/` dan `dist/` tidak masuk git. Server yang sama juga menjadi API lokal untuk analisis LLM **dan** pengumpulan data.
+
+**Batasan/catatan UI:** impor dataset tulis ke server belum tersedia sebagai endpoint; untuk memuat data lain gunakan “Muat data.json” di tab Peta Jaringan (sesi lokal browser) atau salin berkas ke `projects/<slug>/` saat server dimatikan. Fitur Live Stream dan simulasi tidak disertakan. Atribusi Mosaic Lite (GPL-3.0) tetap dipertahankan di footer dan dokumentasi.
 
 ## Analisis konten (LLM)
 
@@ -171,8 +173,8 @@ cp .env.example .env          # lalu isi LLM_API_KEY (dan base URL/model bila pe
 ./run.sh analyze --dry-run    # lihat rencana tanpa memanggil API
 ```
 
-- `./run.sh serve` menjalankan `llm_server.py`, yaitu server statis **sekaligus** API analisis dan API pengumpulan data dalam satu proses (menggantikan `python -m http.server`). Jadi server lokal kecil itu ikut berjalan otomatis—tidak perlu perintah terpisah—dan tombol analisis/scraping langsung berfungsi.
-- Kredensial dibaca dari `.env` oleh `llm_analyze.py` dan **tidak pernah dikirim ke browser**. Tombol **▶ Jalankan analisis** hanya mengirim perintah (opsi `limit`, batch, timeout) ke `/api/analyze` pada server lokal; server yang menjalankan skrip dan menulis `llm_analysis.json` (gitignored). Server juga menyembunyikan `.env` dari `fetch` statis.
+- `./run.sh serve` menjalankan `llm_server.py`, yaitu server statis **sekaligus** API analisis dan API pengumpulan data dalam satu proses (menggantikan `python -m http.server`). Jadi server lokal kecil itu ikut berjalan otomatis—tidak perlu perintah terpisah—dan tombol **Analisis AI**/analisis langsung berfungsi.
+- Kredensial dibaca dari `.env` oleh `llm_analyze.py` dan **tidak pernah dikirim ke browser**. Tombol **Analisis AI** di header (atau tombol analisis di halaman Sentimen) hanya mengirim perintah (opsi `limit`, batch, timeout) ke `/api/analyze` pada server lokal; server yang menjalankan skrip dan menulis `llm_analysis.json` (gitignored). Server juga menyembunyikan `.env` dari `fetch` statis. Panel "Ringkasan AI" di tab Ringkasan adalah narasi ringkas sisi klien dari statistik proyek, bukan hasil label per-komentar.
 - Progres batch ditampilkan di halaman lewat `/api/status` (file progres sementara `llm_progress.json`, gitignored). Analisis yang sudah berjalan—termasuk yang dipicu dari terminal—tidak bisa dijalankan dua kali bersamaan; halaman akan menampilkan statusnya.
 - `viewer.html` tidak memuat hasil LLM sama sekali, sehingga peta jaringan tetap berfungsi normal walaupun analisis belum dijalankan. Bila server analisis tidak tersedia (misal halaman dibuka dengan `python -m http.server` biasa), halaman sentimen tetap bisa menampilkan hasil lama atau memuat berkas manual.
 - Model/config: `LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL=cmd`, `LLM_BATCH_SIZE`, `LLM_TIMEOUT`, `LLM_MAX_TOKENS`. Nilai bawaan ada di `.env.example`. Model `cmd` di gateway ini adalah model *thinking*, jadi `LLM_MAX_TOKENS` perlu besar (≈8000); nilai kecil memotong JSON sebelum selesai.
@@ -202,4 +204,4 @@ Buka `http://localhost:8000/sentimen.html` setelah menjalankan `./run.sh serve`.
 - Scroll berhenti otomatis setelah beberapa putaran tanpa item baru, atau setelah `--max-replies` tercapai. Jeda antar postingan bisa diatur supaya tidak memicu rate limit.
 - Scraping melanggar ketentuan layanan Meta; pakai akun cadangan dan jeda wajar.
 - Rincian pekerjaan ada di `ROADMAP.md`.
-- Lisensi proyek: **GPL-3.0** (`LICENSE`). Tampilan dashboard terinspirasi [Mosaic Lite](https://github.com/cruip/tailwind-dashboard-template) oleh Cruip (GPL-3.0, © 2020 Cruip); atribusi juga tercantum di footer aplikasi. Template tidak di-republish atau dijual kembali.
+- Lisensi proyek: **GPL-3.0** (`LICENSE`). Komponen UI dasar diadaptasi dari [Mosaic Lite](https://github.com/cruip/tailwind-dashboard-template) oleh Cruip (GPL-3.0, © 2020 Cruip); gaya visual shell/tab terinspirasi template *NusaPulse* (pola dire-implementasi, bukan salin kode verbatim; template tanpa lisensi terlampir). Atribusi Mosaic Lite tercantum di footer aplikasi. Template tidak di-republish atau dijual kembali.

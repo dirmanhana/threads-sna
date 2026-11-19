@@ -6,11 +6,11 @@ const fmtNum = (v) => Number(v || 0).toLocaleString('id-ID');
  * Grafik batang ringan berbasis div (tanpa Chart.js).
  * data: [{ label, value, title }]
  */
-export function BarChart({ data = [], height = 180, color = 'bg-brand-500', emptyText = 'Belum ada data waktu.' }) {
+export function BarChart({ data = [], height = 180, color = 'bg-blue-500', emptyText = 'Belum ada data waktu.' }) {
   const rows = Array.isArray(data) ? data : [];
   const max = Math.max(1, ...rows.map((d) => Number(d.value) || 0));
   if (!rows.length) {
-    return <div className="grid place-items-center text-xs text-slate-500 dark:text-gray-400" style={{ height }}>{emptyText}</div>;
+    return <div className="grid place-items-center text-xs text-slate-500 dark:text-slate-400" style={{ height }}>{emptyText}</div>;
   }
   const labelEvery = Math.max(1, Math.ceil(rows.length / 6));
   return (
@@ -35,7 +35,7 @@ export function BarChart({ data = [], height = 180, color = 'bg-brand-500', empt
           );
         })}
       </div>
-      <div className="mt-2 flex justify-between gap-2 text-[11px] text-slate-500 dark:text-gray-400">
+      <div className="mt-2 flex justify-between gap-2 text-[11px] text-slate-500 dark:text-slate-400">
         {rows.map((d, i) => (
           <span key={`${d.label}-x-${i}`} className={i % labelEvery === 0 || i === rows.length - 1 ? '' : 'invisible'}>
             {d.label}
@@ -83,7 +83,7 @@ export function Donut({ segments = [], size = 168, thickness = 20, centerValue, 
           <div className="text-xl font-semibold tabular-nums text-slate-800 dark:text-white">
             {centerValue ?? fmtNum(total)}
           </div>
-          {centerLabel && <div className="text-[11px] text-slate-500 dark:text-gray-400">{centerLabel}</div>}
+          {centerLabel && <div className="text-[11px] text-slate-500 dark:text-slate-400">{centerLabel}</div>}
         </div>
       </div>
     </div>
@@ -91,17 +91,17 @@ export function Donut({ segments = [], size = 168, thickness = 20, centerValue, 
 }
 
 /** Bar horizontal untuk topik/kata kunci. */
-export function RankBars({ rows = [], color = 'bg-brand-500', max: maxProp }) {
+export function RankBars({ rows = [], color = 'bg-blue-500', max: maxProp }) {
   const max = Math.max(1, maxProp || 0, ...rows.map((r) => Number(r.value) || 0));
   return (
     <ul className="space-y-2.5">
       {rows.map((r) => (
         <li key={r.label}>
           <div className="mb-1 flex items-baseline justify-between gap-2 text-xs">
-            <span className="truncate text-slate-700 dark:text-gray-200">{r.label}</span>
-            <span className="shrink-0 tabular-nums text-slate-500 dark:text-gray-400">{fmtNum(r.value)}</span>
+            <span className="truncate text-slate-700 dark:text-slate-200">{r.label}</span>
+            <span className="shrink-0 tabular-nums text-slate-500 dark:text-slate-400">{fmtNum(r.value)}</span>
           </div>
-          <div className="h-1.5 overflow-hidden rounded-full bg-slate-100 dark:bg-gray-700">
+          <div className="h-1.5 overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800">
             <div
               className={`h-full rounded-full ${color}`}
               style={{ width: `${Math.max(2, ((Number(r.value) || 0) / max) * 100)}%` }}

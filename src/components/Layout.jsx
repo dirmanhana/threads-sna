@@ -1,122 +1,110 @@
-import React, { useEffect, useState } from 'react';
-import PageHeader from './PageHeader.jsx';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import GlobalSearch from './GlobalSearch.jsx';
 import StatusPill from './StatusPill.jsx';
 import { api } from '../lib/utils.js';
-import { currentProject, switchProject, withProject } from '../lib/project.js';
+import { currentProject, normalizeProject, switchProject } from '../lib/project.js';
 
-const Icon = ({ d, className = 'w-4 h-4' }) => (
-  <svg className={className} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-    <path d={d} />
-  </svg>
-);
+const nf = (v) => Number(v || 0).toLocaleString('id-ID');
 
-const ICON_SUMMARY = 'M4 4h7v7H4V4Zm9 0h7v4h-7V4ZM4 13h7v7H4v-7Zm9-3h7v10h-7V10Z';
-const ICON_GRAPH = 'M12 2a3 3 0 1 0 0 6 3 3 0 0 0 0-6Zm-7 14a3 3 0 1 0 0 6 3 3 0 0 0 0-6Zm14 0a3 3 0 1 0 0 6 3 3 0 0 0 0-6Zm-7-5.5a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3Zm5.8-1.7-3.2 2.3a4.5 4.5 0 0 1-1.2 2.1l3.1 2.2a4.5 4.5 0 0 1 1.3-2.1l3.2-2.3-3.2-2.2ZM4.2 6.8l3.2 2.3a4.6 4.6 0 0 1 1.2-2.1L5.5 4.8A4.6 4.6 0 0 1 4.2 6.8Zm-1.6 10.5 3.2-2.3a4.5 4.5 0 0 1 2.3 2.2l3.1 2.2a4.5 4.5 0 0 1-2.2-2.2L2.6 17.3Z';
-const ICON_CHART = 'M4 13h4v7H4v-7Zm6-9h4v16h-4V4Zm6 5h4v11h-4V9Z';
-const ICON_DB = 'M12 3c-4.4 0-8 1.3-8 3s3.6 3 8 3 8-1.3 8-3-3.6-3-8-3Zm0 2c3.3 0 6 .8 6 1s-2.7 1-6 1-6-.8-6-1 2.7-1 6-1ZM4 8.2c1.1 1 3.6 1.8 8 1.8s6.9-.8 8-1.8V12c0 1.7-3.6 3-8 3s-8-1.3-8-3V8.2Zm0 5.2c1.1 1 3.6 1.8 8 1.8s6.9-.8 8-1.8V17c0 1.7-3.6 3-8 3s-8-1.3-8-3v-3.6Z';
-const ICON_MENU = 'M4 6h16v2H4V6Zm0 5h16v2H4v-2Zm0 5h16v2H4v-2Z';
-const ICON_CLOSE = 'M18.3 5.7 12 12l6.3 6.3-1.4 1.4L10.6 13.4 4.3 19.7 2.9 18.3 9.2 12 2.9 5.7l1.4-1.4 6.3 6.3 6.3-6.3 1.4 1.4Z';
-const ICON_SUN = 'M12 4V2m0 20v-2m8-8h2M2 12h2m13.7-5.7 1.4-1.4M4.9 19.1l1.4-1.4m11.4 0 1.4 1.4M4.9 4.9l1.4 1.4M12 7a5 5 0 1 0 0 10 5 5 0 0 0 0-10Z';
-const ICON_MOON = 'M20.4 15.1A9 9 0 0 1 8.9 3.6 9 9 0 1 0 20.4 15.1Z';
-const ICON_CHEVRON = 'M8.6 4.6 16 12l-7.4 7.4L7.2 18l6-6-6-6 1.4-1.4Z';
-
-const NAV_GROUPS = [
-  {
-    label: 'Utama',
-    items: [{ href: '/', page: 'ringkasan', icon: ICON_SUMMARY, label: 'Ringkasan' }],
-  },
-  {
-    label: 'Analisis',
-    items: [
-      { href: '/viewer.html', page: 'viewer', icon: ICON_GRAPH, label: 'Peta Jaringan' },
-      { href: '/sentimen.html', page: 'sentimen', icon: ICON_CHART, label: 'Analisis Sentimen' },
-    ],
-  },
-  {
-    label: 'Data',
-    items: [{ href: '/scrape.html', page: 'scrape', icon: ICON_DB, label: 'Pengumpulan Data' }],
-  },
-];
-
-function NavItem({ href, active, icon, label, expanded }) {
+function Icon({ children, className = 'h-4 w-4' }) {
   return (
-    <a
-      href={href}
-      title={label}
-      className={`group flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition
-        ${expanded ? '' : 'lg:justify-center lg:px-0'}
-        ${active
-          ? 'bg-brand-50 text-brand-700 dark:bg-brand-500/15 dark:text-brand-300'
-          : 'text-slate-600 hover:bg-slate-100 dark:text-gray-400 dark:hover:bg-gray-700/60'}`}
-    >
-      <span className={active ? 'text-brand-600 dark:text-brand-400' : 'text-slate-400 group-hover:text-brand-500'}>
-        <Icon d={icon} />
-      </span>
-      <span className={expanded ? '' : 'lg:hidden'}>{label}</span>
-    </a>
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      {children}
+    </svg>
   );
 }
+const I = {
+  ringkasan: (p) => <Icon {...p}><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="4" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="10" width="7" height="11" rx="1.5"/></Icon>,
+  jaringan: (p) => <Icon {...p}><circle cx="6" cy="6" r="2.5"/><circle cx="18" cy="6" r="2.5"/><circle cx="12" cy="18" r="2.5"/><path d="M8 7.2l2.8 8.2M16 7.2l-2.8 8.2M8.5 6h7"/></Icon>,
+  sentimen: (p) => <Icon {...p}><path d="M4 20V10"/><path d="M10 20V4"/><path d="M16 20v-7"/><path d="M22 20V8"/></Icon>,
+  sumber: (p) => <Icon {...p}><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v7c0 1.7 3.6 3 8 3s8-1.3 8-3V5"/><path d="M4 12v7c0 1.7 3.6 3 8 3s8-1.3 8-3v-7"/></Icon>,
+  menu: (p) => <Icon {...p}><path d="M4 6h16M4 12h16M4 18h16"/></Icon>,
+  close: (p) => <Icon {...p}><path d="M6 6l12 12M18 6L6 18"/></Icon>,
+  sun: (p) => <Icon {...p}><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M4.9 4.9l1.4 1.4m11.4 11.4 1.4 1.4M2 12h2m16 0h2M4.9 19.1l1.4-1.4m11.4-11.4 1.4-1.4"/></Icon>,
+  moon: (p) => <Icon {...p}><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"/></Icon>,
+  spark: (p) => <Icon {...p}><path d="M12 3l1.8 4.6L18 9.5l-4.2 1.9L12 16l-1.8-4.6L6 9.5l4.2-1.9L12 3Z"/><path d="M19 14l.8 2.1 2.2.9-2.2.9L19 20l-.8-2.1-2.2-.9 2.2-.9L19 14Z"/></Icon>,
+  search: (p) => <Icon {...p}><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></Icon>,
+  folder: (p) => <Icon {...p}><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z"/></Icon>,
+};
 
-function Sidebar({ page, expanded, setExpanded, open, setOpen }) {
-  const project = currentProject();
+const NAV = [
+  { id: 'ringkasan', label: 'Ringkasan', icon: I.ringkasan },
+  { id: 'jaringan', label: 'Peta Jaringan', icon: I.jaringan },
+  { id: 'sentimen', label: 'Sentimen', icon: I.sentimen },
+  { id: 'sumber', label: 'Sumber & Proyek', icon: I.sumber },
+];
+
+function Sidebar({ tab, project, projects, onTab, onProjectChange, open, setOpen, dark, setDark }) {
+  const activeSlug = normalizeProject(project) || currentProject();
+  const list = projects.length ? projects : [{ slug: activeSlug, name: activeSlug }];
+  if (!list.some((p) => p.slug === activeSlug)) list.unshift({ slug: activeSlug, name: activeSlug });
+
   return (
     <>
-      {open && (
-        <div className="fixed inset-0 z-40 bg-slate-900/40 lg:hidden" onClick={() => setOpen(false)} />
-      )}
-      <aside
-        className={`fixed z-50 flex h-screen flex-col border-r border-slate-200 bg-white px-3 py-4 transition-all duration-200
-          dark:border-gray-700/60 dark:bg-gray-800 lg:sticky lg:top-0 lg:z-auto lg:h-screen lg:translate-x-0
-          ${open ? 'translate-x-0 w-64' : '-translate-x-full w-64'} lg:w-20 ${expanded ? 'lg:w-64' : ''}`}
-      >
-        <div className={`mb-6 flex items-center ${expanded ? 'justify-between px-1' : 'justify-center lg:justify-center'}`}>
-          <a href={withProject('/', project)} className="flex items-center gap-2 text-brand-600" title="Ringkasan">
-            <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-brand-600 text-sm font-bold text-white">SNA</span>
-            <span className={`text-sm font-bold tracking-tight text-slate-800 dark:text-white ${expanded ? '' : 'lg:hidden'}`}>
-              Threads SNA
-            </span>
-          </a>
-          <button className="text-slate-500 lg:hidden" onClick={() => setOpen(false)} aria-label="Tutup menu">
-            <Icon d={ICON_CLOSE} className="w-5 h-5" />
+      {open && <div className="fixed inset-0 z-40 bg-slate-900/40 lg:hidden" onClick={() => setOpen(false)} />}
+      <aside className={`fixed z-50 flex h-screen w-[248px] flex-col border-r border-slate-200 bg-white transition-transform duration-200 dark:border-slate-800 dark:bg-slate-900 lg:sticky lg:top-0 lg:z-auto lg:translate-x-0 ${open ? 'translate-x-0' : '-translate-x-full'}`}>
+        <div className="flex items-center justify-between gap-2 px-4 py-4">
+          <button type="button" onClick={() => { onTab('ringkasan'); setOpen(false); }} className="flex items-center gap-2.5 text-left">
+            <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-blue-600 text-[10px] font-bold tracking-wide text-white font-display">SNA</span>
+            <div className="leading-tight">
+              <div className="text-sm font-bold text-slate-900 font-display dark:text-white">Threads SNA</div>
+              <div className="text-[10px] text-slate-500 dark:text-slate-400">Analisis jaringan &amp; sentimen</div>
+            </div>
           </button>
+          <button className="text-slate-500 lg:hidden" onClick={() => setOpen(false)} aria-label="Tutup menu"><I.close /></button>
         </div>
 
-        <nav className="space-y-5 overflow-y-auto">
-          {NAV_GROUPS.map((group) => (
-            <div key={group.label}>
-              <p className={`mb-1.5 px-3 text-[10px] font-semibold uppercase tracking-wider text-slate-400 ${expanded ? '' : 'lg:hidden'}`}>
-                {group.label}
-              </p>
-              <div className="space-y-1">
-                {group.items.map((item) => (
-                  <NavItem key={item.href} {...item} href={withProject(item.href, project)}
-                    active={page === item.page} expanded={expanded} />
-                ))}
-              </div>
-            </div>
-          ))}
+        <div className="px-3 pb-3">
+          <label className="mb-1 block px-1 text-[10px] font-semibold uppercase tracking-wider text-slate-400">Proyek Pemantauan</label>
+          <div className="relative">
+            <span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400"><I.folder className="h-3.5 w-3.5" /></span>
+            <select
+              className="w-full appearance-none rounded-lg border border-slate-200 bg-slate-50 py-2 pl-8 pr-8 text-xs font-medium text-slate-700 outline-none transition hover:border-slate-300 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/15 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
+              value={activeSlug}
+              onChange={(e) => { const s = e.target.value; onProjectChange(s); setOpen(false); }}
+              aria-label="Pilih proyek"
+            >
+              {list.map((p) => (
+                <option key={p.slug} value={p.slug}>
+                  {p.name}{Number.isFinite(p.posts) ? ` · ${nf(p.posts)}` : ''}
+                </option>
+              ))}
+            </select>
+            <span className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400">▾</span>
+          </div>
+        </div>
+
+        <nav className="flex-1 space-y-0.5 overflow-y-auto px-3 py-1">
+          {NAV.map((item) => {
+            const active = tab === item.id;
+            const IconCmp = item.icon;
+            return (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => { onTab(item.id); setOpen(false); }}
+                className={`flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-xs font-medium transition-colors ${active
+                  ? 'bg-blue-50 text-blue-700 dark:bg-blue-500/15 dark:text-blue-300'
+                  : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-100'}`}
+              >
+                <span className={active ? 'text-blue-600 dark:text-blue-400' : 'text-slate-400'}>
+                  <IconCmp />
+                </span>
+                <span>{item.label}</span>
+              </button>
+            );
+          })}
         </nav>
 
-        <div className="mt-auto space-y-1 border-t border-slate-100 pt-3 dark:border-gray-700/60">
-          <a
-            href={withProject('/scrape.html', project)}
-            className={`flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-slate-500 hover:bg-slate-100 dark:text-gray-400 dark:hover:bg-gray-700/60 ${expanded ? '' : 'lg:justify-center lg:px-0'}`}
-            title={`Proyek aktif: ${project}`}
-          >
-            <span className="grid h-4 w-4 shrink-0 place-items-center rounded bg-brand-100 text-[9px] font-bold text-brand-700 dark:bg-brand-500/20 dark:text-brand-300">
-              {project.slice(0, 1).toUpperCase()}
-            </span>
-            <span className={`truncate text-xs ${expanded ? '' : 'lg:hidden'}`}>{project}</span>
-          </a>
+        <div className="border-t border-slate-200 p-3 dark:border-slate-800">
           <button
-            onClick={() => setExpanded(!expanded)}
-            className={`hidden w-full items-center gap-3 rounded-lg px-3 py-2 text-sm text-slate-500 hover:bg-slate-100 lg:flex dark:text-gray-400 dark:hover:bg-gray-700/60 ${expanded ? '' : 'lg:justify-center lg:px-0'}`}
-            title={expanded ? 'Ringkas menu' : 'Perlebar menu'}
-            aria-label={expanded ? 'Ringkas menu' : 'Perlebar menu'}
+            type="button"
+            onClick={() => setDark(!dark)}
+            className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-xs font-medium text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-100"
+            title={dark ? 'Mode terang' : 'Mode gelap'}
           >
-            <Icon d={ICON_CHEVRON} className={`h-4 w-4 transition-transform ${expanded ? 'rotate-180' : ''}`} />
-            <span className={expanded ? '' : 'lg:hidden'}>Ringkas menu</span>
+            <span className="text-slate-400">{dark ? <I.sun /> : <I.moon />}</span>
+            <span>{dark ? 'Mode Terang' : 'Mode Gelap'}</span>
           </button>
         </div>
       </aside>
@@ -124,126 +112,121 @@ function Sidebar({ page, expanded, setExpanded, open, setOpen }) {
   );
 }
 
-function ProjectPicker() {
-  const active = currentProject();
-  const [projects, setProjects] = useState([]);
-
-  useEffect(() => {
-    let alive = true;
-    api('/api/projects').then((r) => {
-      if (alive && r.ok) setProjects(Array.isArray(r.data?.projects) ? r.data.projects : []);
-    });
-    return () => { alive = false; };
-  }, []);
-
-  const list = projects.length ? projects : [{ slug: active, name: active }];
-  if (!list.some((p) => p.slug === active)) list.unshift({ slug: active, name: active });
-
-  return (
-    <div className="flex min-w-0 items-center gap-1.5">
-      <span className="hidden text-[10px] font-semibold uppercase tracking-wider text-slate-400 lg:inline">Proyek</span>
-      <select
-        className="h-9 w-[104px] min-w-0 rounded-lg border border-slate-200 bg-slate-50 px-2 text-xs text-slate-700 outline-none focus:border-brand-400 focus:ring-2 focus:ring-brand-100 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100 sm:w-auto sm:max-w-[190px]"
-        value={active}
-        onChange={(e) => switchProject(e.target.value)}
-        aria-label="Pilih proyek"
-        title={list.find((p) => p.slug === active)?.name || active}
-      >
-        {list.map((p) => (
-          <option key={p.slug} value={p.slug}>
-            {p.name}{Number.isFinite(p.posts) ? ` · ${p.posts}` : ''}
-          </option>
-        ))}
-      </select>
-      <a href={withProject('/scrape.html', active)} title="Kelola proyek"
-        className="grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-slate-200 text-slate-500 hover:border-brand-300 hover:text-brand-600 dark:border-gray-700 dark:text-gray-400">
-        <span className="text-base leading-none">＋</span>
-      </a>
-    </div>
-  );
-}
-
-function DataStatus() {
-  const project = currentProject();
-  const [status, setStatus] = useState(null);
-  useEffect(() => {
-    let alive = true;
-    const load = async () => {
-      const r = await api('/api/scrape/status?project=' + encodeURIComponent(project));
-      if (!alive) return;
-      if (r.ok && r.data) setStatus(r.data);
-      else setStatus({ offline: true });
-    };
-    load();
-    const id = setInterval(load, 30000);
-    return () => { alive = false; clearInterval(id); };
-  }, [project]);
-
-  if (!status) {
-    return <StatusPill tone="slate" className="hidden sm:inline-flex">Memuat…</StatusPill>;
-  }
-  if (status.offline) {
-    return <StatusPill tone="amber" dot className="hidden sm:inline-flex">Mode statis</StatusPill>;
-  }
-  if (status.running) {
-    return <StatusPill tone="brand" dot pulse className="hidden sm:inline-flex">Scraping…</StatusPill>;
-  }
-  const posts = status.data?.posts ?? 0;
-  const active = status.login?.active;
-  return (
-    <StatusPill tone={active ? 'green' : 'slate'} dot className="hidden sm:inline-flex">
-      {posts} post · {active ? 'sesi aktif' : 'sesi belum ada'}
-    </StatusPill>
-  );
-}
-
-export default function Layout({ page, title, subtitle, meta, children, actions, wide = false }) {
+export default function Layout({ tab, tabLabel, project, onTab, onProjectChange, children }) {
   const [open, setOpen] = useState(false);
-  const [expanded, setExpanded] = useState(() => localStorage.getItem('sna-sidebar') === '1');
-  const [dark, setDark] = useState(() => localStorage.getItem('sna-theme') === 'dark');
+  const [dark, setDark] = useState(() => {
+    try { return localStorage.getItem('sna-theme') === 'dark'; } catch { return false; }
+  });
+  const [projects, setProjects] = useState([]);
+  const [analyzing, setAnalyzing] = useState(false);
+  const [anMsg, setAnMsg] = useState('');
 
   useEffect(() => {
     document.documentElement.classList.toggle('dark', dark);
-    localStorage.setItem('sna-theme', dark ? 'dark' : 'light');
+    try { localStorage.setItem('sna-theme', dark ? 'dark' : 'light'); } catch { /* ignore */ }
   }, [dark]);
+
+  const loadProjects = useCallback(async () => {
+    const r = await api('/api/projects');
+    if (r.ok) setProjects(Array.isArray(r.data?.projects) ? r.data.projects : []);
+  }, []);
+
+  useEffect(() => { loadProjects(); }, [loadProjects, project]);
+
+  const projectName = useMemo(() => {
+    const p = projects.find((x) => x.slug === project);
+    return p?.name || project || 'default';
+  }, [projects, project]);
+
   useEffect(() => {
-    localStorage.setItem('sna-sidebar', expanded ? '1' : '0');
-  }, [expanded]);
+    if (!analyzing) return;
+    let alive = true;
+    const tick = async () => {
+      const s = await api('/api/status?project=' + encodeURIComponent(project || 'default'));
+      if (!alive) return;
+      if (s.ok && s.data?.running) {
+        const d = s.data;
+        setAnMsg(d.message || (d.total ? `${d.done}/${d.total}` : 'Menganalisis…'));
+      } else {
+        setAnalyzing(false);
+        setAnMsg('');
+      }
+    };
+    tick();
+    const id = setInterval(tick, 2000);
+    return () => { alive = false; clearInterval(id); };
+  }, [analyzing, project]);
+
+  const runAnalyze = async () => {
+    if (analyzing) return;
+    const r = await api('/api/analyze', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ project: project || 'default' }),
+    });
+    if (r.ok || r.status === 409) { setAnalyzing(true); setAnMsg('Memulai analisis…'); }
+    else if (r.status === 404 || r.status === 501) setAnMsg('Server analisis tidak aktif');
+    else setAnMsg(r.data?.message || 'Gagal memulai');
+  };
+
+  const handleProjectChange = (slug) => {
+    const s = normalizeProject(slug) || 'default';
+    onProjectChange?.(s);
+    try {
+      localStorage.setItem('sna-project', s);
+      const u = new URL(globalThis.location.href);
+      u.searchParams.set('project', s);
+      globalThis.history.replaceState({}, '', u.pathname + u.search + u.hash);
+    } catch { /* ignore */ }
+  };
 
   return (
     <div className="min-h-screen lg:flex">
-      <Sidebar page={page} expanded={expanded} setExpanded={setExpanded} open={open} setOpen={setOpen} />
+      <Sidebar
+        tab={tab} project={project} projects={projects}
+        onTab={onTab} onProjectChange={handleProjectChange}
+        open={open} setOpen={setOpen} dark={dark} setDark={setDark}
+      />
 
       <div className="min-w-0 flex-1">
-        <header className="sticky top-0 z-30 border-b border-slate-200 bg-white/90 backdrop-blur dark:border-gray-700/60 dark:bg-gray-900/90">
-          <div className="flex h-16 items-center gap-3 px-4 sm:px-6 lg:px-8">
-            <button className="shrink-0 text-slate-600 dark:text-gray-300 lg:hidden" onClick={() => setOpen(true)} aria-label="Buka menu">
-              <Icon d={ICON_MENU} className="w-5 h-5" />
-            </button>
-            <GlobalSearch />
+        <header className="sticky top-0 z-30 border-b border-slate-200 bg-white/90 backdrop-blur dark:border-slate-800 dark:bg-slate-900/90">
+          <div className="flex h-14 items-center gap-3 px-4 sm:px-6">
+            <button className="shrink-0 text-slate-600 lg:hidden dark:text-slate-300" onClick={() => setOpen(true)} aria-label="Buka menu"><I.menu /></button>
+
+            <div className="hidden min-w-0 shrink items-center gap-1.5 text-xs sm:flex">
+              <span className="truncate text-slate-500 dark:text-slate-400">Proyek</span>
+              <span className="text-slate-300 dark:text-slate-600">/</span>
+              <span className="truncate font-medium text-slate-700 dark:text-slate-200">{projectName}</span>
+              <span className="text-slate-300 dark:text-slate-600">/</span>
+              <span className="truncate font-semibold text-slate-900 dark:text-white">{tabLabel}</span>
+            </div>
+
+            <div className="min-w-0 flex-1 sm:max-w-md">
+              <GlobalSearch />
+            </div>
+
             <div className="ml-auto flex shrink-0 items-center gap-2">
-              <ProjectPicker />
-              <DataStatus />
+              {anMsg && <span className="hidden max-w-[180px] truncate text-[11px] text-blue-600 sm:inline dark:text-blue-300">{anMsg}</span>}
               <button
-                onClick={() => setDark(!dark)}
-                className="grid h-9 w-9 place-items-center rounded-lg text-slate-500 transition hover:bg-slate-100 dark:text-gray-400 dark:hover:bg-gray-700/60"
-                title={dark ? 'Mode terang' : 'Mode gelap'}
-                aria-label={dark ? 'Mode terang' : 'Mode gelap'}
+                type="button"
+                onClick={runAnalyze}
+                disabled={analyzing}
+                className="btn-primary h-8 px-3"
+                title="Jalankan analisis AI untuk proyek ini"
               >
-                <Icon d={dark ? ICON_SUN : ICON_MOON} />
+                <I.spark className="h-3.5 w-3.5" />
+                <span className="hidden sm:inline">{analyzing ? 'Menganalisis…' : 'Analisis AI'}</span>
               </button>
             </div>
           </div>
         </header>
 
-        <main className={`mx-auto w-full ${wide ? 'max-w-[1800px]' : 'max-w-[1536px]'} px-4 py-6 sm:px-6 lg:px-8`}>
-          <PageHeader title={title} subtitle={subtitle} meta={meta} actions={actions} />
+        <main className="mx-auto w-full max-w-[1440px] px-4 py-5 sm:px-6 lg:px-8">
           {children}
         </main>
 
-        <footer className="mx-auto w-full max-w-[1536px] px-4 pb-6 text-[11px] text-slate-500 sm:px-6 lg:px-8 dark:text-gray-400">
-          Label LLM adalah bantuan triase, bukan bukti. Selalu verifikasi manual. ·
-          Terinspirasi <a className="underline" href="https://github.com/cruip/tailwind-dashboard-template" target="_blank" rel="noreferrer">Mosaic Lite</a> (GPL-3.0).
+        <footer className="mx-auto w-full max-w-[1440px] px-4 pb-6 text-[11px] leading-relaxed text-slate-500 sm:px-6 lg:px-8 dark:text-slate-400">
+          Label AI adalah bantuan triase, bukan bukti. Selalu verifikasi manual. · Gaya visual terinspirasi template dashboard; komponen UI dasar diadaptasi dari <a className="underline hover:text-slate-700 dark:hover:text-slate-200" href="https://github.com/cruip/tailwind-dashboard-template" target="_blank" rel="noreferrer">Mosaic Lite</a> (GPL-3.0).
         </footer>
       </div>
     </div>

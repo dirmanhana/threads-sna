@@ -1,23 +1,23 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { authorUrl, esc, fmt, hl, itemUrl, linkUser, postUrl, replayDate, tlLabel } from '../lib/viewerLib.js';
 
-const H4 = ({ children }) => <h4 className="mb-1.5 mt-4 text-[13px] font-semibold text-slate-800 dark:text-gray-100">{children}</h4>;
+const H4 = ({ children }) => <h4 className="mb-1.5 mt-4 text-[13px] font-semibold text-slate-800 dark:text-slate-100">{children}</h4>;
 
 const Tag = ({ children }) => (
-  <div className="text-[11px] text-slate-600 dark:text-gray-400">{children}</div>
+  <div className="text-[11px] text-slate-600 dark:text-slate-400">{children}</div>
 );
 
 const Btn = ({ children, onClick, active }) => (
   <button onClick={onClick}
     className={`rounded-lg border px-2.5 py-1 text-[11px] font-medium transition ${active
-      ? 'border-brand-500 bg-brand-50 text-brand-700 dark:bg-brand-500/15 dark:text-brand-300'
-      : 'border-slate-200 bg-white text-slate-600 hover:border-brand-300 hover:text-brand-600 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-300'}`}>
+      ? 'border-brand-500 bg-blue-50 text-blue-700 dark:bg-blue-500/15 dark:text-blue-300'
+      : 'border-slate-200 bg-white text-slate-600 hover:border-blue-300 hover:text-blue-600 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300'}`}>
     {children}
   </button>
 );
 
 const Empty = ({ children }) => (
-  <p className="py-6 text-center text-[11px] text-slate-600 dark:text-gray-400">{children}</p>
+  <p className="py-6 text-center text-[11px] text-slate-600 dark:text-slate-400">{children}</p>
 );
 
 function UserLink({ id, posts, url }) {
@@ -73,24 +73,24 @@ function PostCard({ p, only, posts, keyword }) {
   const total = thread.length + replies.length;
 
   return (
-    <article className="mb-2 rounded-xl border border-slate-200 bg-slate-50 text-xs dark:border-gray-700 dark:bg-gray-800/60">
+    <article className="mb-2 rounded-xl border border-slate-200 bg-slate-50 text-xs dark:border-slate-800 dark:bg-slate-900/60">
       <div className="p-2.5">
         <div className="flex flex-wrap items-baseline gap-x-1.5 gap-y-0.5">
-          <span className="font-semibold text-slate-800 dark:text-gray-100">
+          <span className="font-semibold text-slate-800 dark:text-slate-100">
             <UserLink id={p.author} posts={posts} url={postUrl(p)} />
           </span>
-          <span className="text-[11px] text-slate-500 dark:text-gray-400">
+          <span className="text-[11px] text-slate-500 dark:text-slate-400">
             {only ? `(dikomentari @${only})` : 'memposting'}
           </span>
-          {p.timestamp && <span className="text-[11px] text-slate-500 dark:text-gray-400">🗓 {p.timestamp}</span>}
-          {Number.isFinite(p.likes) && <span className="text-[11px] text-slate-500 dark:text-gray-400">♥ {p.likes}</span>}
+          {p.timestamp && <span className="text-[11px] text-slate-500 dark:text-slate-400">🗓 {p.timestamp}</span>}
+          {Number.isFinite(p.likes) && <span className="text-[11px] text-slate-500 dark:text-slate-400">♥ {p.likes}</span>}
         </div>
-        <div className={`my-1 whitespace-pre-wrap break-words text-slate-700 dark:text-gray-200 ${open ? '' : 'line-clamp-6'}`}>
+        <div className={`my-1 whitespace-pre-wrap break-words text-slate-700 dark:text-slate-200 ${open ? '' : 'line-clamp-6'}`}>
           <Rich text={p.text} keyword={keyword} />
         </div>
         {total > 0 && (
           <button
-            className="text-[11px] font-medium text-brand-600 hover:underline dark:text-brand-300"
+            className="text-[11px] font-medium text-blue-600 hover:underline dark:text-blue-300"
             onClick={() => setOpen((v) => !v)}
             aria-expanded={open}
           >
@@ -100,15 +100,15 @@ function PostCard({ p, only, posts, keyword }) {
       </div>
 
       {open && (
-        <div className="border-t border-slate-200 px-2.5 py-2 dark:border-gray-700">
+        <div className="border-t border-slate-200 px-2.5 py-2 dark:border-slate-800">
           {thread.map((t, i) => (
-            <div key={`t-${i}`} className="my-1.5 border-l-[3px] border-emerald-500 pl-2 text-[12px] text-slate-600 dark:text-gray-400">
-              <span className="text-[11px] text-slate-500 dark:text-gray-400">thread</span>{' '}
-              <b className="text-slate-800 dark:text-gray-100">
+            <div key={`t-${i}`} className="my-1.5 border-l-[3px] border-emerald-500 pl-2 text-[12px] text-slate-600 dark:text-slate-400">
+              <span className="text-[11px] text-slate-500 dark:text-slate-400">thread</span>{' '}
+              <b className="text-slate-800 dark:text-slate-100">
                 <UserLink id={t.author} posts={posts} url={itemUrl(t, p)} />
               </b>:{' '}
               <Rich text={t.text} keyword={keyword} />
-              {t.timestamp && <span className="text-[11px] text-slate-500 dark:text-gray-400"> {t.timestamp}</span>}
+              {t.timestamp && <span className="text-[11px] text-slate-500 dark:text-slate-400"> {t.timestamp}</span>}
             </div>
           ))}
           {ordered.slice(0, limit).map((r, i) => {
@@ -117,25 +117,25 @@ function PostCard({ p, only, posts, keyword }) {
             return (
               <div key={`r-${r.code || i}`}
                 style={indent ? { marginLeft: `${indent}px` } : undefined}
-                className={`my-1.5 border-l-[3px] pl-2 text-[12px] text-slate-600 dark:text-gray-400 ${depth > 1 ? 'border-slate-400 dark:border-gray-500' : 'border-brand-500'}`}>
-                <span className="text-[11px] text-slate-500 dark:text-gray-400">{depth > 1 ? 'balasan' : 'komentar'}</span>{' '}
+                className={`my-1.5 border-l-[3px] pl-2 text-[12px] text-slate-600 dark:text-slate-400 ${depth > 1 ? 'border-slate-400 dark:border-gray-500' : 'border-brand-500'}`}>
+                <span className="text-[11px] text-slate-500 dark:text-slate-400">{depth > 1 ? 'balasan' : 'komentar'}</span>{' '}
                 {depth > 1 && r.reply_to_author && (
-                  <span className="text-[11px] text-slate-500 dark:text-gray-400">↳ @{r.reply_to_author} · </span>
+                  <span className="text-[11px] text-slate-500 dark:text-slate-400">↳ @{r.reply_to_author} · </span>
                 )}
-                <b className="text-slate-800 dark:text-gray-100">
+                <b className="text-slate-800 dark:text-slate-100">
                   <UserLink id={r.author} posts={posts} url={itemUrl(r, p)} />
                 </b>:{' '}
                 <Rich text={r.text} keyword={keyword} />
-                {r.timestamp && <span className="text-[11px] text-slate-500 dark:text-gray-400"> {r.timestamp}</span>}
+                {r.timestamp && <span className="text-[11px] text-slate-500 dark:text-slate-400"> {r.timestamp}</span>}
                 {r.timestamp_source === 'estimated' && (
-                  <span className="text-[11px] italic text-slate-500 dark:text-gray-400"> (perkiraan)</span>
+                  <span className="text-[11px] italic text-slate-500 dark:text-slate-400"> (perkiraan)</span>
                 )}
               </div>
             );
           })}
           {ordered.length > limit && (
             <button
-              className="mt-1 text-[11px] font-medium text-brand-600 hover:underline dark:text-brand-300"
+              className="mt-1 text-[11px] font-medium text-blue-600 hover:underline dark:text-blue-300"
               onClick={() => setLimit((l) => l + 20)}
             >
               Muat {Math.min(20, ordered.length - limit)} komentar lagi
@@ -156,20 +156,20 @@ function MetricTable({ metrics, posts }) {
     <>
       <H4>Metrik jaringan</H4>
       <table className="w-full table-fixed border-collapse text-[11px]">
-        <thead><tr><th className="border border-slate-200 p-1 text-left dark:border-gray-700">Metrik</th>
-          {[1, 2, 3, 4, 5].map((i) => <th key={i} className="border border-slate-200 p-1 text-center dark:border-gray-700">{i}</th>)}</tr></thead>
+        <thead><tr><th className="border border-slate-200 p-1 text-left dark:border-slate-800">Metrik</th>
+          {[1, 2, 3, 4, 5].map((i) => <th key={i} className="border border-slate-200 p-1 text-center dark:border-slate-800">{i}</th>)}</tr></thead>
         <tbody>
           {defs.map(([name, map, f3]) => {
             const top = [...(map?.entries() || [])].sort((a, b) => b[1] - a[1] || String(a[0]).localeCompare(String(b[0]))).slice(0, 5);
             return (
               <tr key={name}>
-                <th className="border border-slate-200 p-1 text-left dark:border-gray-700">{name}</th>
+                <th className="border border-slate-200 p-1 text-left dark:border-slate-800">{name}</th>
                 {Array.from({ length: 5 }, (_, i) => (
-                  <td key={i} className="border border-slate-200 p-1 align-top break-words dark:border-gray-700">
+                  <td key={i} className="border border-slate-200 p-1 align-top break-words dark:border-slate-800">
                     {top[i] ? (
                       <>
                         <UserLink id={top[i][0]} posts={posts} />{' '}
-                        <span className="text-[10px] text-slate-500 dark:text-gray-400">{f3 ? fmt(top[i][1]) : top[i][1]}</span>
+                        <span className="text-[10px] text-slate-500 dark:text-slate-400">{f3 ? fmt(top[i][1]) : top[i][1]}</span>
                       </>
                     ) : '-'}
                   </td>
@@ -283,18 +283,18 @@ function CommentsTab({ SNA, posts, keyword, q, setQ, limit, setLimit }) {
       />
       {!filtered.length && <Empty>Tidak ada komentar yang cocok.</Empty>}
       {shown.map((c, i) => (
-        <article key={`${c.postCode}-${i}`} className="mb-2 rounded-lg border border-slate-200 bg-slate-50 p-2 text-xs dark:border-gray-700 dark:bg-gray-800/60">
+        <article key={`${c.postCode}-${i}`} className="mb-2 rounded-lg border border-slate-200 bg-slate-50 p-2 text-xs dark:border-slate-800 dark:bg-slate-900/60">
           <div className="flex flex-wrap items-baseline gap-x-1.5 gap-y-0.5">
-            <b className="text-slate-800 dark:text-gray-100"><UserLink id={c.author} posts={posts} url={itemUrl(c, { code: c.postCode, author: c.postAuthor })} /></b>
+            <b className="text-slate-800 dark:text-slate-100"><UserLink id={c.author} posts={posts} url={itemUrl(c, { code: c.postCode, author: c.postAuthor })} /></b>
             {replyDepth(c) > 1 && (
-              <span className="text-[11px] text-slate-500 dark:text-gray-400">
+              <span className="text-[11px] text-slate-500 dark:text-slate-400">
                 balasan{c.reply_to_author ? ` ↳ @${c.reply_to_author}` : ''}
               </span>
             )}
-            <span className="text-[11px] text-slate-500 dark:text-gray-400">di <UserLink id={c.postAuthor} posts={posts} url={c.postUrl} /></span>
-            {c.timestamp && <span className="text-[11px] text-slate-500 dark:text-gray-400">· {c.timestamp}</span>}
+            <span className="text-[11px] text-slate-500 dark:text-slate-400">di <UserLink id={c.postAuthor} posts={posts} url={c.postUrl} /></span>
+            {c.timestamp && <span className="text-[11px] text-slate-500 dark:text-slate-400">· {c.timestamp}</span>}
           </div>
-          <div className="mt-1 whitespace-pre-wrap break-words text-slate-700 dark:text-gray-200">
+          <div className="mt-1 whitespace-pre-wrap break-words text-slate-700 dark:text-slate-200">
             <Rich text={c.text} keyword={keyword} />
           </div>
         </article>
@@ -318,11 +318,11 @@ function AnomalyBody({ posts, keyword, anomaly, anonOpts, onRefreshAnomaly, onAn
   return (
     <div>
       <Tag>{c.clusters.length} klaster CIB · {t.bursts.length} lonjakan · {hi} akun risiko tinggi · {mid} sedang</Tag>
-      <p className="my-1.5 text-[11px] italic text-slate-500 dark:text-gray-400">Heuristik untuk triase, bukan bukti. Selalu verifikasi manual.</p>
+      <p className="my-1.5 text-[11px] italic text-slate-500 dark:text-slate-400">Heuristik untuk triase, bukan bukti. Selalu verifikasi manual.</p>
       <div className="my-2 flex flex-wrap gap-1.5">
         <Btn onClick={onRefreshAnomaly}>Hitung ulang</Btn>
       </div>
-      <div className="text-[11px] text-slate-600 dark:text-gray-400">
+      <div className="text-[11px] text-slate-600 dark:text-slate-400">
         CIB: jendela{' '}
         <select className="field !py-0.5" value={win} onChange={(e) => onAnonWin?.(Number(e.target.value))}>
           {[5, 10, 30].map((v) => <option key={v} value={v}>{v} mnt</option>)}
@@ -335,15 +335,15 @@ function AnomalyBody({ posts, keyword, anomaly, anonOpts, onRefreshAnomaly, onAn
       <H4>Lonjakan volume</H4>
       {t.bursts.length ? t.bursts.slice(0, 8).map((b) => (
         <Tag key={b.t}>
-          <button className="text-brand-600 hover:underline dark:text-brand-300" onClick={() => onBucket?.(b.t)}>{esc(tlLabel(b.t, t.stepMs))}</button>
+          <button className="text-blue-600 hover:underline dark:text-blue-300" onClick={() => onBucket?.(b.t)}>{esc(tlLabel(b.t, t.stepMs))}</button>
           {' · '}{b.count} komentar ({b.threshold} ambang{b.ratio ? ` · ${b.ratio}× median` : ''})
         </Tag>
       )) : <Tag>Tidak ada lonjakan signifikan.</Tag>}
       <H4>Pola komentar identik / mirip (CIB)</H4>
       {c.clusters.length ? c.clusters.slice(0, 6).map((k, i) => (
-        <div key={i} className="my-1.5 rounded-xl border-l-[3px] border-orange-500 bg-slate-50 p-2.5 dark:bg-gray-800/60">
+        <div key={i} className="my-1.5 rounded-xl border-l-[3px] border-orange-500 bg-slate-50 p-2.5 dark:bg-slate-900/60">
           <Tag>Klaster {i + 1} · {k.windowCount} komentar dalam jendela · {k.authors.length} akun · keyakinan {Math.round(k.confidence * 100)}%{k.resolution === 'date' ? ' · hanya tanggal' : ''}</Tag>
-          <div className="my-1 whitespace-pre-wrap break-words text-xs text-slate-700 dark:text-gray-200">
+          <div className="my-1 whitespace-pre-wrap break-words text-xs text-slate-700 dark:text-slate-200">
             <Rich text={k.text} keyword={keyword} />
           </div>
           <Tag>{k.windowAuthors.map((id) => <span key={id}><UserLink id={id} posts={posts} /> </span>)}</Tag>
@@ -351,7 +351,7 @@ function AnomalyBody({ posts, keyword, anomaly, anonOpts, onRefreshAnomaly, onAn
       )) : <Tag>Tidak ada pola copy-paste terdeteksi.</Tag>}
       <H4>Skor buzzer (heuristik)</H4>
       {s.some((x) => x.score > 0) ? s.filter((x) => x.score > 0).slice(0, 15).map((x) => (
-        <div key={x.id} className="mb-2 rounded-xl border border-slate-200 bg-white p-2 dark:border-gray-700 dark:bg-gray-800">
+        <div key={x.id} className="mb-2 rounded-xl border border-slate-200 bg-white p-2 dark:border-slate-800 dark:bg-slate-900">
           <span className={`mr-1.5 inline-block rounded-md px-1.5 py-0.5 text-[10px] font-bold text-white ${x.level === 'tinggi' ? 'bg-red-800' : x.level === 'sedang' ? 'bg-amber-700' : 'bg-slate-500'}`}>{x.score}</span>
           <UserLink id={x.id} posts={posts} />
           <Tag>{x.reasons.join(' · ') || 'tidak ada indikator'}</Tag>
@@ -378,8 +378,8 @@ function BucketBody({ SNA, posts, keyword, selectedBucket, anomaly, onAnomalyPan
       ))}</>}
       <H4>Contoh komentar</H4>
       {evs.slice(0, 8).map((e, i) => (
-        <div key={i} className="mb-2 rounded-xl border border-slate-200 bg-slate-50 p-2 dark:border-gray-700 dark:bg-gray-800/60">
-          <div className="whitespace-pre-wrap break-words text-xs text-slate-700 dark:text-gray-200">
+        <div key={i} className="mb-2 rounded-xl border border-slate-200 bg-slate-50 p-2 dark:border-slate-800 dark:bg-slate-900/60">
+          <div className="whitespace-pre-wrap break-words text-xs text-slate-700 dark:text-slate-200">
             <Rich text={e.text} keyword={keyword} />
           </div>
           <Tag><UserLink id={e.author} posts={posts} /> · {esc(e.post || '-')}</Tag>
@@ -449,11 +449,11 @@ function LinkBody({ l, posts, keyword }) {
     <div>
       <Tag>{esc(l.type)} · {l.w || 0}× · {items.length} contoh</Tag>
       {items.slice(0, limit).map((it, i) => (
-        <div key={i} className="mb-2 rounded-xl border border-slate-200 bg-slate-50 p-2.5 text-xs dark:border-gray-700 dark:bg-gray-800/60">
-          <div className="whitespace-pre-wrap break-words text-slate-700 dark:text-gray-200">
+        <div key={i} className="mb-2 rounded-xl border border-slate-200 bg-slate-50 p-2.5 text-xs dark:border-slate-800 dark:bg-slate-900/60">
+          <div className="whitespace-pre-wrap break-words text-slate-700 dark:text-slate-200">
             <Rich text={it.text} keyword={keyword} />
           </div>
-          <div className="mt-1 text-[11px] text-slate-500 dark:text-gray-400">
+          <div className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
             <UserLink id={it.author} posts={posts} url={itemUrl(it, { code: it.postCode, author: it.author })} />
             {' · '}{esc(it.postCode)}{it.timestamp ? ` · ${esc(it.timestamp)}` : ''}
           </div>
@@ -543,11 +543,11 @@ export default function InfoPanel(props) {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="shrink-0 border-b border-slate-200 px-3 pb-2 pt-3 dark:border-gray-700/60">
+      <div className="shrink-0 border-b border-slate-200 px-3 pb-2 pt-3 dark:border-slate-800">
         <div className="flex items-center justify-between gap-2">
           <h2 className="truncate text-sm font-semibold text-slate-800 dark:text-white">{title}</h2>
           {detail && (
-            <button className="text-slate-500 hover:text-slate-700 dark:text-gray-400 dark:hover:text-gray-200"
+            <button className="text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-gray-200"
               onClick={onClosePanel} aria-label="Tutup detail">✕</button>
           )}
         </div>
@@ -560,8 +560,8 @@ export default function InfoPanel(props) {
                 aria-selected={activeTab === t.id}
                 onClick={() => onTab?.(t.id)}
                 className={`shrink-0 rounded-lg px-2.5 py-1 text-[11px] font-medium transition ${activeTab === t.id
-                  ? 'bg-brand-50 text-brand-700 dark:bg-brand-500/15 dark:text-brand-300'
-                  : 'text-slate-600 hover:bg-slate-100 dark:text-gray-400 dark:hover:bg-gray-700/60'}`}
+                  ? 'bg-blue-50 text-blue-700 dark:bg-blue-500/15 dark:text-blue-300'
+                  : 'text-slate-600 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800'}`}
               >
                 {t.label}
                 {t.badge > 0 && (
