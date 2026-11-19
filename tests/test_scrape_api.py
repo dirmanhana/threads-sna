@@ -18,6 +18,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 import llm_server  # noqa: E402
+import projects as project_store  # noqa: E402
 import scrape_threads  # noqa: E402
 
 STUB = r'''
@@ -26,6 +27,8 @@ ap = argparse.ArgumentParser()
 ap.add_argument("mode"); ap.add_argument("target", nargs="?")
 ap.add_argument("--progress-file", default="")
 ap.add_argument("--out", default="")
+ap.add_argument("--failed", default="")
+ap.add_argument("--project", default="")
 ap.add_argument("--max-posts", type=int, default=10)
 ap.add_argument("--max-replies", type=int, default=400)
 ap.add_argument("--replace", action="store_true")
@@ -117,26 +120,35 @@ class ApiTest(unittest.TestCase):
         d = Path(cls.tmp.name)
         cls.stub = d / "stub_scraper.py"
         cls.stub.write_text(STUB, encoding="utf-8")
-        cls.data = d / "data.json"
-        cls.prog = d / "scrape_progress.json"
-        cls.login_prog = d / "login_progress.json"
-        cls.marker = d / "login_marker"
+        cls.projects_dir = d / "projects"
         cls.originals = {
-            "SCRAPER": llm_server.SCRAPER, "DATA": llm_server.DATA,
-            "SCRAPE_PROGRESS": llm_server.SCRAPE_PROGRESS,
+            "PROJECTS": project_store.PROJECTS,
+            "LEGACY_DATA": project_store.LEGACY_DATA,
+            "LEGACY_ANALYSIS": project_store.LEGACY_ANALYSIS,
+            "LEGACY_FAILED": project_store.LEGACY_FAILED,
+            "TRASH": project_store.TRASH,
+            "SCRAPER": llm_server.SCRAPER,
             "LOGIN_PROGRESS": llm_server.LOGIN_PROGRESS,
             "LOGIN_MARKER": llm_server.LOGIN_MARKER,
             "PROFILE_DIR": llm_server.PROFILE_DIR,
             "external_pid": llm_server.external_pid,
         }
+        project_store.PROJECTS = cls.projects_dir
+        project_store.TRASH = cls.projects_dir / ".trash"
+        project_store.LEGACY_DATA = d / "data.json"
+        project_store.LEGACY_ANALYSIS = d / "llm_analysis.json"
+        project_store.LEGACY_FAILED = d / "failed.json"
+        cls.migrated = project_store.ensure_default_project()
+        cls.data = cls.projects_dir / "default" / "data.json"
+        cls.prog = cls.projects_dir / "default" / "scrape_progress.json"
         # Jangan biarkan proses scraper nyata/sisa tes lain mengganggu guard proses ganda.
         llm_server.external_pid = lambda name, own=(): None
         llm_server.SCRAPER = cls.stub
-        llm_server.DATA = cls.data
-        llm_server.SCRAPE_PROGRESS = cls.prog
-        llm_server.LOGIN_PROGRESS = cls.login_prog
-        llm_server.LOGIN_MARKER = cls.marker
+        llm_server.LOGIN_PROGRESS = d / "login_progress.json"
+        llm_server.LOGIN_MARKER = d / "login_marker"
         llm_server.PROFILE_DIR = d / "profil_kosong"
+        cls.login_prog = llm_server.LOGIN_PROGRESS
+        cls.marker = llm_server.LOGIN_MARKER
         handler = lambda *a, **kw: llm_server.Handler(*a, directory=str(ROOT), **kw)
         cls.server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
         cls.base = "http://127.0.0.1:%d" % cls.server.server_address[1]
@@ -148,7 +160,9 @@ class ApiTest(unittest.TestCase):
         cls.server.shutdown()
         cls.server.server_close()
         for k, v in cls.originals.items():
-            setattr(llm_server, k, v)
+            target = project_store if k in ("PROJECTS", "LEGACY_DATA", "LEGACY_ANALYSIS",
+                                            "LEGACY_FAILED", "TRASH") else llm_server
+            setattr(target, k, v)
         cls.tmp.cleanup()
 
     def get(self, path):
@@ -208,16 +222,37 @@ class ApiTest(unittest.TestCase):
         self.fail("job tidak selesai dalam batas waktu")
 
     def test_halaman_dan_status(self):
+        self.assertEqual(self.migrated["slug"], "default")
         code, html = self.get("/scrape.html")
         self.assertEqual(code, 200)
         self.assertIn('id="root"', html)
-        code, st = self.get("/api/scrape/status")
+        code, _ = self.get("/api/scrape/status")
         self.assertEqual(code, 200)
+        st = self.get_json("/api/scrape/status")
         for key in ("running", "phase", "log", "data", "login"):
             self.assertIn(key, st)
+        self.assertEqual(st["project"], "default")
         code, login = self.get("/api/login/status")
         self.assertEqual(code, 200)
         self.assertIn("active", login)
+
+    def test_daftar_dan_slug_tidak_valid(self):
+        res = self.get_json("/api/projects")
+        self.assertIn("default", [p["slug"] for p in res["projects"]])
+        with self.assertRaises(urllib.error.HTTPError) as ctx:
+            self.get("/api/scrape/status?project=../etc")
+        self.assertEqual(ctx.exception.code, 400)
+
+    def test_file_proyek_tersembunyi_tertutup(self):
+        for path in ("/projects/default/scrape_progress.json",
+                     "/projects/default/failed.json", "/projects/default/meta.json",
+                     "/projects/default/llm_progress.json",
+                     "/projects/.trash/apapun/data.json",
+                     "/projects/default/../default/data.json"):
+            with self.subTest(path=path):
+                with self.assertRaises(urllib.error.HTTPError) as ctx:
+                    self.get(path)
+                self.assertEqual(ctx.exception.code, 404)
 
     def test_api_wajib_token_dan_origin(self):
         code, res = self.post("/api/scrape/cancel", token=False)

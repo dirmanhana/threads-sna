@@ -719,6 +719,8 @@ def main():
     ap.add_argument("--max-posts", type=int, default=10)
     ap.add_argument("--max-replies", type=int, default=400, help="batas komentar per postingan")
     ap.add_argument("--out", default=OUT, help="file hasil (default: data.json)")
+    ap.add_argument("--failed", default="", help="file URL gagal (default: failed.json di folder --out)")
+    ap.add_argument("--project", default="", help="slug proyek di projects/<slug>/ (opsional)")
     ap.add_argument("--delay", type=float, default=3.0, help="jeda dasar antar postingan (detik)")
     ap.add_argument("--profile-dir", default=PROFILE_DIR, help="direktori sesi login")
     ap.add_argument("--show", action="store_true", help="tampilkan browser")
@@ -729,7 +731,27 @@ def main():
     ap.add_argument("--login-marker", default="", help="berkas penanda konfirmasi login dari web")
     a = ap.parse_args()
     say = log if a.web else print
-    prog = a.progress_file if a.web else ""
+
+    if a.project:
+        try:
+            import projects as project_store
+            meta = project_store.get_project(a.project)
+            if not meta:
+                say("! proyek tidak ditemukan:", a.project)
+                return 2
+            paths = project_store.paths(a.project)
+            if a.out == OUT:
+                a.out = str(paths["data"])
+            if not a.failed:
+                a.failed = str(paths["failed"])
+            if not a.progress_file:
+                a.progress_file = str(paths["progress"])
+        except ValueError as exc:
+            say("! proyek tidak valid:", exc)
+            return 2
+
+    failed_path = a.failed or os.path.join(os.path.dirname(a.out) or ".", FAILED)
+    prog = a.progress_file if (a.web or a.project) else ""
 
     if a.mode == "web-login":
         return web_login(a.profile_dir, a.login_marker, prog, a.login_timeout)
@@ -802,14 +824,14 @@ def main():
 
         if failed:
             old = []
-            if os.path.exists(FAILED):
+            if os.path.exists(failed_path):
                 try:
-                    old = json.load(open(FAILED, encoding="utf-8"))
+                    old = json.load(open(failed_path, encoding="utf-8"))
                 except (OSError, ValueError):
                     old = []
             seen = {x["url"] for x in old}
-            save_json(FAILED, old + [x for x in failed if x["url"] not in seen])
-            say("URL gagal dicatat ke", FAILED)
+            save_json(failed_path, old + [x for x in failed if x["url"] not in seen])
+            say("URL gagal dicatat ke", failed_path)
         if new_results or not failed:
             posts = {} if a.replace else load_posts(a.out)
             for r in new_results:
@@ -826,7 +848,7 @@ def main():
             say("Tersimpan ke", a.out)
             write_progress(prog, "done", done=len(urls), total=len(urls),
                            saved=len(new_results),
-                           message=f"Selesai · {len(new_results)} postingan baru · {len(posts)} total di data.json")
+                           message=f"Selesai · {len(new_results)} postingan baru · {len(posts)} total di {os.path.basename(a.out)}")
         else:
             note = ("Tidak ada hasil baru; file hasil tidak ditimpa. "
                     "Jika semua gagal, sesi login bisa kedaluwarsa — klik Login di halaman web.")

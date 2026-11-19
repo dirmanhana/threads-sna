@@ -16,6 +16,7 @@ llm_analysis.lock
 scrape_progress.json
 login_progress.json
 login_selesai.marker
+projects/
 .DS_Store
 node_modules/
 dist/

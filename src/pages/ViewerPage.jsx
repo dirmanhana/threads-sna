@@ -4,6 +4,7 @@ import GraphCanvas from '../components/GraphCanvas.jsx';
 import Timeline from '../components/Timeline.jsx';
 import InfoPanel from '../components/InfoPanel.jsx';
 import { getJson } from '../lib/utils.js';
+import { currentProject, projectFile } from '../lib/project.js';
 import { SAMPLE, authorUrl, buildEvents, cmp, postsUntil } from '../lib/viewerLib.js';
 import { exportEdgesCsv, exportGraphMl, exportNodesCsv, exportPng, exportReport, exportSvg } from '../lib/exportGraph.js';
 import '../../viewer_core.js';
@@ -11,6 +12,7 @@ import '../../viewer_core.js';
 const SNA = globalThis.SNA;
 
 export default function ViewerPage() {
+  const project = currentProject();
   const graphRef = useRef(null);
   const fileRef = useRef(null);
 
@@ -54,17 +56,17 @@ export default function ViewerPage() {
   useEffect(() => {
     let alive = true;
     (async () => {
-      const d = await getJson('data.json');
+      const d = await getJson(projectFile('data.json', project));
       if (!alive) return;
       if (d && (Array.isArray(d) || Array.isArray(d.posts))) {
-        try { load(d); } catch (e) { setWarn('data.json terbaca, tetapi gagal dirender: ' + (e?.message || e)); load(SAMPLE); }
+        try { load(d); } catch (e) { setWarn('Data proyek terbaca, tetapi gagal dirender: ' + (e?.message || e)); load(SAMPLE); }
       } else {
         load(SAMPLE);
-        setWarn('Gagal memuat data.json — menampilkan data contoh. Buka lewat ./run.sh serve agar fetch lokal diizinkan.');
+        setWarn(`Gagal memuat data proyek ${project} — menampilkan data contoh. Buka lewat ./run.sh serve agar fetch lokal diizinkan.`);
       }
     })();
     return () => { alive = false; };
-  }, [load]);
+  }, [load, project]);
 
   useEffect(() => {
     const id = setTimeout(() => setAppliedKw(kw), 250);
@@ -293,7 +295,8 @@ export default function ViewerPage() {
   );
 
   return (
-    <Layout page="viewer" title="Peta Jaringan" subtitle="Siapa bicara dengan siapa — interaktif, lokal, tanpa backend"
+    <Layout page="viewer" title="Peta Jaringan"
+      subtitle={`Proyek ${project} · siapa bicara dengan siapa — interaktif, lokal, tanpa backend`}
       wide actions={actions}>
       <div className="flex flex-col gap-3 xl:h-[calc(100vh-248px)] xl:min-h-[620px]">
         {warn && (

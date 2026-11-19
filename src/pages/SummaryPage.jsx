@@ -6,6 +6,7 @@ import StatusPill from '../components/StatusPill.jsx';
 import EmptyState from '../components/EmptyState.jsx';
 import { BarChart, Donut, RankBars } from '../components/MiniCharts.jsx';
 import { api, formatDate, getJson } from '../lib/utils.js';
+import { currentProject, projectFile, withProject } from '../lib/project.js';
 import '../../viewer_core.js';
 
 const SNA = globalThis.SNA;
@@ -54,6 +55,7 @@ function SentimentLegend({ rows }) {
 }
 
 export default function SummaryPage() {
+  const project = currentProject();
   const [posts, setPosts] = useState([]);
   const [llm, setLlm] = useState(null);
   const [status, setStatus] = useState(null);
@@ -65,9 +67,9 @@ export default function SummaryPage() {
     (async () => {
       setLoading(true);
       const [d, l, s] = await Promise.all([
-        getJson('data.json?t=' + Date.now()),
-        getJson('llm_analysis.json?t=' + Date.now()),
-        api('/api/scrape/status'),
+        getJson(projectFile('data.json', project) + '?t=' + Date.now()),
+        getJson(projectFile('llm_analysis.json', project) + '?t=' + Date.now()),
+        api('/api/scrape/status?project=' + encodeURIComponent(project)),
       ]);
       if (!alive) return;
       setPosts(Array.isArray(d) ? d : (Array.isArray(d?.posts) ? d.posts : []));
@@ -76,7 +78,7 @@ export default function SummaryPage() {
       setLoading(false);
     })();
     return () => { alive = false; };
-  }, [tick]);
+  }, [tick, project]);
 
   const graph = useMemo(
     () => SNA.build(posts, { types: new Set(['komentar', 'mention']), minDeg: 1 }),
@@ -230,8 +232,8 @@ export default function SummaryPage() {
   const actions = (
     <>
       <button className="btn" onClick={() => setTick((t) => t + 1)}>↻ Muat ulang</button>
-      <a className="btn" href="/scrape.html">Mulai scraping</a>
-      <a className="btn btn-primary" href="/sentimen.html">Jalankan analisis</a>
+      <a className="btn" href={withProject('/scrape.html', project)}>Mulai scraping</a>
+      <a className="btn btn-primary" href={withProject('/sentimen.html', project)}>Jalankan analisis</a>
     </>
   );
 
@@ -242,10 +244,10 @@ export default function SummaryPage() {
 
   return (
     <Layout page="ringkasan" title="Ringkasan"
-      subtitle="Gambaran singkat data Threads: volume, aktor, sentimen, dan sinyal anomali"
+      subtitle={`Proyek ${project} · gambaran singkat data Threads: volume, aktor, sentimen, dan sinyal anomali`}
       actions={actions}>
       {loading && (
-        <Card className="mb-6 p-5 text-sm text-slate-500 dark:text-gray-400">Memuat data.json…</Card>
+        <Card className="mb-6 p-5 text-sm text-slate-500 dark:text-gray-400">Memuat data proyek {project}…</Card>
       )}
 
       {!loading && !hasData && (
@@ -254,7 +256,7 @@ export default function SummaryPage() {
             <EmptyState
               title="Belum ada data"
               description="Jalankan pengumpulan data dari halaman Pengumpulan Data, lalu kembali ke ringkasan ini."
-              action={<a className="btn btn-primary" href="/scrape.html">Buka Pengumpulan Data</a>}
+              action={<a className="btn btn-primary" href={withProject('/scrape.html', project)}>Buka Pengumpulan Data</a>}
             />
           </CardBody>
         </Card>

@@ -29,19 +29,19 @@ import sqlite3
 import subprocess
 import sys
 import threading
+import posixpath
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib.parse import parse_qs, unquote, urlsplit
+
+import projects as project_store
 
 ROOT = Path(__file__).resolve().parent
 DIST = ROOT / "dist"
-PROGRESS = ROOT / "llm_progress.json"
-RESULT = ROOT / "llm_analysis.json"
 SCRAPER = ROOT / "scrape_threads.py"
 PROFILE_DIR = ROOT / "threads_profile"
-SCRAPE_PROGRESS = ROOT / "scrape_progress.json"
 LOGIN_PROGRESS = ROOT / "login_progress.json"
 LOGIN_MARKER = ROOT / "login_selesai.marker"
-DATA = ROOT / "data.json"
 
 _state = {"proc": None, "lock": threading.Lock(), "log": [], "error": None, "args": None}
 _job = {"proc": None, "lock": threading.Lock(), "log": [], "error": None, "args": None}
@@ -51,8 +51,11 @@ API_TOKEN = secrets.token_urlsafe(32)
 SENSITIVE = (
     "/.env", "/llm_analysis.lock", "/llm_progress.json",
     "/scrape_progress.json", "/login_progress.json", "/login_selesai.marker",
-    "/threads_profile", "/failed.json",
+    "/threads_profile", "/failed.json", "/index.json",
+    "/data.json", "/llm_analysis.json", "/data.json.bak",
 )
+# File proyek yang boleh dibaca peramban (sisanya dianggap sensitif).
+PROJECT_PUBLIC = {"data.json", "llm_analysis.json"}
 
 
 # ---------- utilitas proses ----------
@@ -124,45 +127,60 @@ def start_subprocess(cmd: list[str], state: dict, tag: str,
 
 # ---------- status analisis LLM (perilaku lama dipertahankan) ----------
 
-def progress_data() -> dict:
+def progress_data(path: Path) -> dict:
     try:
-        d = json.loads(PROGRESS.read_text(encoding="utf-8"))
+        d = json.loads(path.read_text(encoding="utf-8"))
         return {"done": int(d.get("done", 0)), "total": int(d.get("total", 0)),
                 "labeled": int(d.get("labeled", 0))}
     except Exception:
         return {"done": 0, "total": 0, "labeled": 0}
 
 
-def result_info() -> dict | None:
-    if not RESULT.exists():
+def result_info(slug: str) -> dict | None:
+    try:
+        p = project_store.paths(slug)
+    except ValueError:
+        return None
+    result = p["analysis"]
+    if not result.exists():
         return None
     try:
-        d = json.loads(RESULT.read_text(encoding="utf-8-sig"))
+        d = json.loads(result.read_text(encoding="utf-8-sig"))
         counts = d.get("counts") or {}
         return {"labeled": counts.get("labeled"), "topics": counts.get("topics"),
                 "model": d.get("model"), "generated_at": d.get("generated_at"),
-                "mtime": RESULT.stat().st_mtime}
+                "mtime": result.stat().st_mtime}
     except Exception:
         return None
 
 
-def status_payload() -> dict:
+def status_payload(slug: str = "default") -> dict:
+    try:
+        p = project_store.paths(slug)
+    except ValueError:
+        return {"running": False, "project": slug, "done": 0, "total": 0,
+                "labeled": 0, "result": None, "error": "Slug proyek tidak valid."}
     proc = _state["proc"]
     running = proc is not None and proc.poll() is None
     ext = None if running else external_pid("llm_analyze.py", own_pid(_state))
-    prog = progress_data()
+    prog = progress_data(p["llm_progress"])
+    job_project = (_state.get("args") or {}).get("project") or "default"
     message = None
     if running:
-        message = "Analisis berjalan di server ini."
+        message = ("Analisis proyek %s berjalan di server ini." % job_project
+                   if job_project == slug else
+                   "Analisis proyek %s sedang berjalan." % job_project)
     elif ext:
         message = "Analisis sudah berjalan dalam proses lain (PID %d)." % ext
     return {
         "running": running or ext is not None,
         "external": bool(ext) and not running,
         "pid": proc.pid if running else ext,
+        "project": slug,
+        "jobProject": job_project if running else None,
         "message": message,
         "done": prog["done"], "total": prog["total"], "labeled": prog["labeled"],
-        "error": _state["error"], "result": result_info(),
+        "error": _state["error"], "result": result_info(slug),
     }
 
 
@@ -207,18 +225,23 @@ def session_active() -> bool:
         return False
 
 
-def data_info() -> dict:
-    info = {"exists": DATA.exists(), "posts": 0, "mtime": None,
-            "size": DATA.stat().st_size if DATA.exists() else 0, "backup": None}
+def data_info(slug: str = "default") -> dict:
+    try:
+        data = project_store.paths(slug)["data"]
+    except ValueError:
+        return {"exists": False, "posts": 0, "mtime": None, "size": 0, "backup": None}
+    info = {"exists": data.exists(), "posts": 0, "mtime": None,
+            "size": data.stat().st_size if data.exists() else 0, "backup": None,
+            "project": slug}
     if info["exists"]:
         try:
-            d = json.loads(DATA.read_text(encoding="utf-8-sig"))
+            d = json.loads(data.read_text(encoding="utf-8-sig"))
             posts = d.get("posts") if isinstance(d, dict) else d
             info["posts"] = len(posts) if isinstance(posts, list) else 0
-            info["mtime"] = DATA.stat().st_mtime
+            info["mtime"] = data.stat().st_mtime
         except Exception:
             pass
-    bak = Path(str(DATA) + ".bak")
+    bak = Path(str(data) + ".bak")
     if bak.exists():
         info["backup"] = bak.stat().st_mtime
     return info
@@ -239,18 +262,27 @@ def login_status_payload() -> dict:
     }
 
 
-def scrape_status_payload() -> dict:
+def scrape_status_payload(slug: str = "default") -> dict:
     running = is_running(_job)
     logging_in = is_running(_login)
     ext = None if (running or logging_in) else external_pid(
         "scrape_threads.py", own_pid(_job) + own_pid(_login))
-    prog = read_json(SCRAPE_PROGRESS, {})
+    try:
+        progress = project_store.paths(slug)["progress"]
+    except ValueError:
+        progress = Path("/nonexistent")
+    prog = read_json(progress, {})
     phase = prog.get("phase") or ("scrape" if running else "")
+    job_project = (_job.get("args") or {}).get("project") or "default"
     message = prog.get("message") or ("Scraping berjalan…" if running else "Siap.")
+    if running and job_project != slug:
+        message = "Scraping proyek %s sedang berjalan." % job_project
     return {
         "running": running or ext is not None,
         "external": bool(ext) and not running,
         "pid": _job["proc"].pid if running else ext,
+        "project": slug,
+        "jobProject": job_project if running else None,
         "phase": phase,
         "done": int(prog.get("done") or 0),
         "total": int(prog.get("total") or 0),
@@ -258,7 +290,7 @@ def scrape_status_payload() -> dict:
         "message": message,
         "error": _job["error"] or prog.get("error"),
         "log": _job["log"][-60:],
-        "data": data_info(),
+        "data": data_info(slug),
         "login": login_status_payload(),
     }
 
@@ -303,8 +335,11 @@ def validate_scrape_body(body) -> tuple[dict | None, str | None]:
 
     raw_merge = body.get("merge", True)
     merge = str(raw_merge).lower() not in ("false", "0", "no", "")
+    project = str(body.get("project") or "default").strip()
+    if not project_store.valid_slug(project):
+        return None, "Slug proyek tidak valid."
     return {
-        "mode": mode, "target": target,
+        "mode": mode, "target": target, "project": project,
         "maxPosts": clamp(body.get("maxPosts"), 1, 100, 10),
         "maxReplies": clamp(body.get("maxReplies"), 1, 1000, 400),
         "merge": merge,
@@ -370,27 +405,81 @@ class Handler(SimpleHTTPRequestHandler):
 
     # ---------- GET ----------
 
+    def query_project(self) -> str:
+        query = parse_qs(urlsplit(self.path).query)
+        return str((query.get("project") or ["default"])[0] or "default")
+
+    def project_or_error(self, slug: str):
+        if not project_store.valid_slug(slug):
+            self.reply(400, {"error": "Slug proyek tidak valid.",
+                             "message": "Slug proyek tidak valid.", "started": False})
+            return None
+        meta = project_store.get_project(slug)
+        if not meta:
+            self.reply(404, {"error": "Proyek tidak ditemukan.",
+                             "message": "Proyek tidak ditemukan.", "started": False})
+            return None
+        return meta
+
     def do_GET(self):
-        path = self.path.split("?", 1)[0]
+        parts = urlsplit(self.path)
+        path = parts.path
         if not self.host_allowed():
             return self.reply(403, {"error": "Host tidak diizinkan."})
         if path == "/api/session":
             if not self.origin_allowed():
                 return self.reply(403, {"error": "Origin tidak diizinkan."})
             return self.reply(200, {"token": API_TOKEN})
+        if path == "/api/projects":
+            return self.reply(200, {"projects": project_store.list_projects(),
+                                    "default": "default"})
+        slug = self.query_project()
+        if path in ("/api/status", "/api/result", "/api/scrape/status", "/api/data"):
+            meta = self.project_or_error(slug)
+            if not meta:
+                return
         if path in ("/api/status", "/api/result"):
-            data = status_payload()
+            data = status_payload(slug)
             return self.reply(200, data if path == "/api/status" else data.get("result"))
         if path == "/api/scrape/status":
-            return self.reply(200, scrape_status_payload())
+            return self.reply(200, scrape_status_payload(slug))
         if path == "/api/login/status":
             return self.reply(200, login_status_payload())
         if path == "/api/data":
-            return self.reply(200, data_info())
+            return self.reply(200, data_info(slug))
+        if path.startswith("/projects/"):
+            if not self.serve_project_file(path):
+                return
         if any(path.startswith(x) for x in SENSITIVE):
             self.send_error(404, "Tidak ditemukan")
             return
         super().do_GET()
+
+    def serve_project_file(self, path: str) -> bool:
+        """Sajikan hanya projects/<slug>/<data.json|llm_analysis.json>; tolak sisanya."""
+        segments = [s for s in path.split("/") if s not in ("", ".")]
+        ok = (len(segments) == 3 and segments[0] == "projects"
+              and project_store.valid_slug(segments[1])
+              and segments[2] in PROJECT_PUBLIC)
+        if not ok:
+            self.send_error(404, "Tidak ditemukan")
+            return False
+        try:
+            target = (project_store.project_dir(segments[1]) / segments[2]).resolve()
+        except ValueError:
+            self.send_error(404, "Tidak ditemukan")
+            return False
+        if not target.is_file():
+            self.send_error(404, "Tidak ditemukan")
+            return False
+        body = target.read_bytes()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(body)
+        return True
 
     # ---------- POST ----------
 
@@ -405,6 +494,9 @@ class Handler(SimpleHTTPRequestHandler):
                                     "Token API tidak valid. Muat ulang halaman."})
         routes = {
             "/api/analyze": self.post_analyze,
+            "/api/projects": self.post_project_create,
+            "/api/projects/rename": self.post_project_rename,
+            "/api/projects/delete": self.post_project_delete,
             "/api/scrape/start": self.post_scrape_start,
             "/api/scrape/cancel": self.post_scrape_cancel,
             "/api/login/start": self.post_login_start,
@@ -417,11 +509,50 @@ class Handler(SimpleHTTPRequestHandler):
             return
         handler()
 
+    def post_project_create(self):
+        body = self.json_body()
+        try:
+            project = project_store.create_project(body.get("name"), body.get("slug"))
+        except ValueError as exc:
+            self.reply(400, {"created": False, "message": str(exc)})
+            return
+        self.reply(201, {"created": True, "project": project})
+
+    def post_project_rename(self):
+        body = self.json_body()
+        slug = str(body.get("slug") or "").strip()
+        try:
+            project = project_store.rename_project(slug, body.get("name"))
+        except FileNotFoundError:
+            self.reply(404, {"renamed": False, "message": "Proyek tidak ditemukan."})
+            return
+        except ValueError as exc:
+            self.reply(400, {"renamed": False, "message": str(exc)})
+            return
+        self.reply(200, {"renamed": True, "project": project})
+
+    def post_project_delete(self):
+        body = self.json_body()
+        slug = str(body.get("slug") or "").strip()
+        try:
+            info = project_store.delete_project(slug)
+        except FileNotFoundError:
+            self.reply(404, {"deleted": False, "message": "Proyek tidak ditemukan."})
+            return
+        except ValueError as exc:
+            self.reply(400, {"deleted": False, "message": str(exc)})
+            return
+        self.reply(200, {"deleted": True, **info})
+
     def post_analyze(self):
         body = self.json_body()
+        slug = str(body.get("project") or "default").strip()
+        if not self.project_or_error(slug):
+            return
         limit = max(0, int(body.get("limit") or 0))
         batch = max(0, int(body.get("batchSize") or 0))
         timeout = max(0, int(body.get("timeout") or 0))
+        paths = project_store.paths(slug)
 
         with _state["lock"]:
             proc = _state["proc"]
@@ -433,19 +564,20 @@ class Handler(SimpleHTTPRequestHandler):
                 self.reply(409, {"started": False, "message":
                                  "Analisis sudah berjalan dalam proses lain (PID %d)." % ext})
                 return
-            cmd = [sys.executable, str(ROOT / "llm_analyze.py")]
+            cmd = [sys.executable, str(ROOT / "llm_analyze.py"),
+                   "--in", str(paths["data"]), "--out", str(paths["analysis"]),
+                   "--progress-file", str(paths["llm_progress"])]
             if limit:
                 cmd += ["--limit", str(limit)]
             if batch:
                 cmd += ["--batch-size", str(batch)]
             if timeout:
                 cmd += ["--timeout", str(timeout)]
-            cmd += ["--progress-file", str(PROGRESS)]
             _state["error"] = None
             _state["log"] = []
-            _state["args"] = body
+            _state["args"] = {**body, "project": slug}
             try:
-                PROGRESS.unlink(missing_ok=True)
+                paths["llm_progress"].unlink(missing_ok=True)
                 proc = subprocess.Popen(cmd, cwd=str(ROOT),
                                         stdout=subprocess.DEVNULL,
                                         stderr=subprocess.PIPE, text=True, bufsize=1)
@@ -454,13 +586,17 @@ class Handler(SimpleHTTPRequestHandler):
                 return
             _state["proc"] = proc
             threading.Thread(target=drain, args=(proc,), daemon=True).start()
-        self.reply(202, {"started": True, "pid": proc.pid})
+        self.reply(202, {"started": True, "pid": proc.pid, "project": slug})
 
     def post_scrape_start(self):
         req, error = validate_scrape_body(self.json_body())
         if error:
             self.reply(400, {"started": False, "message": error})
             return
+        slug = req["project"]
+        if not self.project_or_error(slug):
+            return
+        paths = project_store.paths(slug)
         with _browser_lock:
             if is_running(_login):
                 self.reply(409, {"started": False, "message": "Proses login masih berjalan."})
@@ -476,17 +612,18 @@ class Handler(SimpleHTTPRequestHandler):
             cmd = [sys.executable, str(SCRAPER), req["mode"], req["target"],
                    "--max-posts", str(req["maxPosts"]),
                    "--max-replies", str(req["maxReplies"]),
-                   "--out", str(DATA), "--profile-dir", str(PROFILE_DIR),
-                   "--web", "--progress-file", str(SCRAPE_PROGRESS)]
+                   "--out", str(paths["data"]), "--failed", str(paths["failed"]),
+                   "--profile-dir", str(PROFILE_DIR),
+                   "--web", "--progress-file", str(paths["progress"])]
             if not req["merge"]:
                 cmd.append("--replace")
             try:
-                proc = start_subprocess(cmd, _job, "scrape", SCRAPE_PROGRESS)
+                proc = start_subprocess(cmd, _job, "scrape", paths["progress"])
             except Exception as exc:
                 self.reply(500, {"started": False, "message": "Gagal memulai: %s" % exc})
                 return
             _job["args"] = req
-        self.reply(202, {"started": True, "pid": proc.pid})
+        self.reply(202, {"started": True, "pid": proc.pid, "project": slug})
 
     def post_scrape_cancel(self):
         self.reply(200, {"stopped": kill_proc(_job)})
@@ -547,6 +684,9 @@ def main() -> int:
     ap.add_argument("--port", type=int, default=8000)
     ap.add_argument("--host", default="127.0.0.1")
     a = ap.parse_args()
+    migrated = project_store.ensure_default_project()
+    if migrated:
+        print("Proyek default dibuat dari data lama: %s" % migrated["slug"], file=sys.stderr)
     handler = lambda *args, **kw: Handler(*args, directory=str(ROOT), **kw)
     server = ThreadingHTTPServer((a.host, a.port), handler)
     mode = "build React (dist/)" if (DIST / "index.html").exists() else "HTML lama (jalankan npm run build)"

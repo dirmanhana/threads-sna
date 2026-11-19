@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import Layout from '../components/Layout.jsx';
 import { api, formatDate } from '../lib/utils.js';
+import { currentProject, projectFile, switchProject, withProject } from '../lib/project.js';
 
 const MODES = [
   { id: 'profile', label: 'Profil akun', target: 'nama_akun',
@@ -26,6 +27,7 @@ function Bar({ value }) {
 }
 
 export default function ScrapePage() {
+  const project = currentProject();
   const [mode, setMode] = useState('profile');
   const [target, setTarget] = useState('');
   const [maxPosts, setMaxPosts] = useState(10);
@@ -35,13 +37,22 @@ export default function ScrapePage() {
   const [warn, setWarn] = useState('');
   const [busy, setBusy] = useState(false);
   const [serverOk, setServerOk] = useState(true);
+  const [projects, setProjects] = useState([]);
+  const [newName, setNewName] = useState('');
+  const [projectBusy, setProjectBusy] = useState(false);
   const logRef = useRef(null);
 
   const refresh = useCallback(async () => {
-    const r = await api('/api/scrape/status');
+    const r = await api('/api/scrape/status?project=' + encodeURIComponent(project));
     if (!r.ok) { setServerOk(false); return; }
     setServerOk(true);
     setStatus(r.data);
+  }, [project]);
+
+  const refreshProjects = useCallback(async () => {
+    const r = await api('/api/projects');
+    if (r.ok) setProjects(Array.isArray(r.data?.projects) ? r.data.projects : []);
+    return r;
   }, []);
 
   useEffect(() => {
@@ -49,6 +60,8 @@ export default function ScrapePage() {
     const id = setInterval(refresh, 1500);
     return () => clearInterval(id);
   }, [refresh]);
+
+  useEffect(() => { refreshProjects(); }, [refreshProjects]);
 
   const log = status?.log || [];
   useEffect(() => {
@@ -78,10 +91,52 @@ export default function ScrapePage() {
   const startScrape = () => {
     if (!target.trim()) { setWarn('Isi target terlebih dahulu.'); return; }
     return send('/api/scrape/start', {
-      mode, target: target.trim(), maxPosts: Number(maxPosts) || 10,
+      project, mode, target: target.trim(), maxPosts: Number(maxPosts) || 10,
       maxReplies: Number(maxReplies) || 400, merge,
     });
   };
+
+  const createProject = async () => {
+    const name = newName.trim();
+    if (!name) { setWarn('Isi nama proyek baru.'); return; }
+    setProjectBusy(true);
+    const r = await api('/api/projects', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name }),
+    });
+    setProjectBusy(false);
+    if (!r.ok) { setWarn(r.data?.message || 'Gagal membuat proyek.'); return; }
+    switchProject(r.data.project.slug);
+  };
+
+  const renameProject = async () => {
+    const current = projects.find((p) => p.slug === project);
+    const name = globalThis.prompt('Nama proyek baru', current?.name || project);
+    if (!name || !name.trim() || name.trim() === current?.name) return;
+    setProjectBusy(true);
+    const r = await api('/api/projects/rename', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ slug: project, name: name.trim() }),
+    });
+    setProjectBusy(false);
+    if (!r.ok) { setWarn(r.data?.message || 'Gagal mengganti nama proyek.'); return; }
+    switchProject(project);
+  };
+
+  const deleteProject = async () => {
+    if (!globalThis.confirm(`Hapus proyek "${project}"? Data dipindahkan ke projects/.trash dan bisa dipulihkan manual.`)) return;
+    setProjectBusy(true);
+    const r = await api('/api/projects/delete', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ slug: project }),
+    });
+    setProjectBusy(false);
+    if (!r.ok) { setWarn(r.data?.message || 'Gagal menghapus proyek.'); return; }
+    const next = projects.find((p) => p.slug !== project);
+    switchProject(next?.slug || 'default');
+  };
+
+  const projectName = projects.find((p) => p.slug === project)?.name || project;
 
   const login = status?.login || {};
   const job = status || {};
@@ -94,13 +149,14 @@ export default function ScrapePage() {
 
   const actions = (
     <>
-      <a className="btn" href="/viewer.html">Peta jaringan</a>
-      <a className="btn" href="/sentimen.html">Sentimen</a>
+      <a className="btn" href={withProject('/viewer.html', project)}>Peta jaringan</a>
+      <a className="btn" href={withProject('/sentimen.html', project)}>Sentimen</a>
     </>
   );
 
   return (
-    <Layout page="scrape" title="Pengumpulan Data" subtitle="Ambil postingan & komentar Threads dari browser, lalu simpan ke data.json"
+    <Layout page="scrape" title="Pengumpulan Data"
+      subtitle={`Proyek ${projectName} · ambil postingan & komentar Threads lalu simpan ke projects/${project}/data.json`}
       actions={actions}>
       {!serverOk && (
         <div className="card mb-4 border-amber-300 bg-amber-50 p-4 text-sm text-amber-800 dark:border-amber-700 dark:bg-amber-900/30 dark:text-amber-200">
@@ -116,6 +172,46 @@ export default function ScrapePage() {
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_380px]">
         <div className="min-w-0 space-y-4">
+          {/* ---- Proyek ---- */}
+          <section className="card p-5">
+            <div className="mb-3 flex flex-wrap items-center gap-2">
+              <h2 className="text-sm font-semibold text-slate-800 dark:text-white">0 · Proyek</h2>
+              <span className="badge badge-netral" title={`projects/${project}/`}>{project}</span>
+            </div>
+            <p className="mb-3 text-xs leading-relaxed text-slate-500 dark:text-gray-400">
+              Setiap proyek punya folder sendiri di <code className="rounded bg-slate-100 px-1 dark:bg-gray-700">projects/&lt;slug&gt;/</code>
+              sehingga komentar antar penelitian tidak tercampur. Ganti proyek lewat pemilih di kanan atas.
+            </p>
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <input
+                className="input min-w-0 flex-1"
+                placeholder="Nama proyek baru, mis. Pendukung Kandidat A"
+                value={newName}
+                onChange={(e) => setNewName(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') createProject(); }}
+                aria-label="Nama proyek baru"
+              />
+              <button className="btn btn-primary" disabled={projectBusy} onClick={createProject}>＋ Buat proyek</button>
+            </div>
+            <div className="mt-2 flex flex-wrap gap-2">
+              <button className="btn" disabled={projectBusy} onClick={renameProject}>Ganti nama…</button>
+              <button className="btn" disabled={projectBusy || projects.length <= 1} onClick={deleteProject}>Hapus proyek…</button>
+            </div>
+            {projects.length > 0 && (
+              <ul className="mt-3 divide-y divide-slate-100 rounded-xl border border-slate-200 text-xs dark:divide-gray-700/60 dark:border-gray-700">
+                {projects.map((p) => (
+                  <li key={p.slug} className={`flex items-center gap-2 px-3 py-2 ${p.slug === project ? 'bg-brand-50/60 dark:bg-brand-500/10' : ''}`}>
+                    <span className="min-w-0 flex-1 truncate font-medium text-slate-700 dark:text-gray-200">{p.name}</span>
+                    <span className="shrink-0 tabular-nums text-slate-400">{p.posts || 0} post</span>
+                    {p.slug === project
+                      ? <span className="shrink-0 text-[10px] font-semibold uppercase text-brand-600 dark:text-brand-300">aktif</span>
+                      : <button className="shrink-0 font-semibold text-brand-600 hover:underline dark:text-brand-300" onClick={() => switchProject(p.slug)}>buka</button>}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+
           {/* ---- Sesi login ---- */}
           <section className="card p-5">
             <div className="mb-3 flex flex-wrap items-center gap-2">

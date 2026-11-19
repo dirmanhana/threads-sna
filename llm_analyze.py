@@ -303,8 +303,9 @@ def analyze(cfg: dict, items: list[dict], batch_size: int, timeout: int,
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="Analisis konten Threads via LLM")
-    ap.add_argument("--in", dest="inp", default=str(ROOT / "data.json"))
-    ap.add_argument("--out", default=str(ROOT / "llm_analysis.json"))
+    ap.add_argument("--project", default="", help="slug proyek di projects/<slug>/ (opsional)")
+    ap.add_argument("--in", dest="inp", default="")
+    ap.add_argument("--out", default="")
     ap.add_argument("--env", default=str(ROOT / ".env"))
     ap.add_argument("--limit", type=int, default=0, help="batasi jumlah komentar (0=semua)")
     ap.add_argument("--batch-size", type=int, default=0)
@@ -314,6 +315,22 @@ def main(argv=None) -> int:
                     help="tulis progres batch ke file JSON (dipakai server lokal)")
     ap.add_argument("--dry-run", action="store_true", help="tampilkan rencana tanpa panggil API")
     a = ap.parse_args(argv)
+
+    if a.project:
+        try:
+            import projects as project_store
+            if not project_store.get_project(a.project):
+                print("Proyek tidak ditemukan: %s" % a.project, file=sys.stderr)
+                return 1
+            paths = project_store.paths(a.project)
+            a.inp = a.inp or str(paths["data"])
+            a.out = a.out or str(paths["analysis"])
+            a.progress_file = a.progress_file or str(paths["llm_progress"])
+        except ValueError as exc:
+            print("Proyek tidak valid: %s" % exc, file=sys.stderr)
+            return 1
+    a.inp = a.inp or str(ROOT / "data.json")
+    a.out = a.out or str(ROOT / "llm_analysis.json")
 
     cfg = load_env(Path(a.env))
     cfg = {k: (os.environ.get(k) or v) for k, v in cfg.items()}

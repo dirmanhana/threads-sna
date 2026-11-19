@@ -35,7 +35,7 @@ case "$cmd" in
     python llm_server.py --port "$port"
     ;;
   migrate) python migrate_data.py --src "$OUT" ;;
-  analyze) python llm_analyze.py "$@" ;;
+  analyze) python llm_analyze.py --project "${PROJECT:-default}" "$@" ;;
   test)
     python -m unittest discover -s tests -p 'test_*.py'
     if command -v node >/dev/null 2>&1; then node --test tests/test_viewer.mjs; else echo "node tidak ada; lewati test viewer."; fi

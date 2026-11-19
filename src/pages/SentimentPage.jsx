@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Layout from '../components/Layout.jsx';
 import { api, cmp, download, getJson, highlight, num } from '../lib/utils.js';
+import { currentProject, projectFile } from '../lib/project.js';
 import '../../viewer_core.js';
 
 const SNA = globalThis.SNA;
@@ -62,6 +63,7 @@ function CommentItem({ e, topicLabel, keywords }) {
 }
 
 export default function SentimentPage() {
+  const project = currentProject();
   const [posts, setPosts] = useState([]);
   const [raw, setRaw] = useState(null);
   const [entries, setEntries] = useState([]);
@@ -109,33 +111,36 @@ export default function SentimentPage() {
   useEffect(() => {
     let alive = true;
     (async () => {
-      const [d, l] = await Promise.all([getJson('data.json'), getJson('llm_analysis.json')]);
+      const [d, l] = await Promise.all([
+        getJson(projectFile('data.json', project)),
+        getJson(projectFile('llm_analysis.json', project)),
+      ]);
       if (!alive) return;
       if (Array.isArray(d)) setPosts(d);
       else if (Array.isArray(d?.posts)) setPosts(d.posts);
       if (l?.comments) applyLlm(l, Array.isArray(d) ? d : d?.posts || []);
-      else setWarn('Hasil analisis LLM belum tersedia. Klik ▶ Jalankan analisis atau muat llm_analysis.json manual.');
-      const s = await api('/api/status');
+      else setWarn(`Hasil analisis LLM untuk proyek ${project} belum tersedia. Klik ▶ Jalankan analisis atau muat llm_analysis.json manual.`);
+      const s = await api('/api/status?project=' + encodeURIComponent(project));
       if (alive && s.ok && s.data?.running) setStatus(s.data);
     })();
     return () => { alive = false; };
-  }, [applyLlm]);
+  }, [applyLlm, project]);
 
   useEffect(() => {
     if (!status?.running) return;
     const id = setInterval(async () => {
-      const s = await api('/api/status');
+      const s = await api('/api/status?project=' + encodeURIComponent(project));
       if (!s.ok) { setStatus(null); setWarn('Server analisis tidak merespons.'); return; }
       if (s.data?.running) { setStatus(s.data); return; }
       clearInterval(id);
       setStatus(null);
-      const fresh = await getJson('llm_analysis.json?t=' + Date.now());
+      const fresh = await getJson(projectFile('llm_analysis.json', project) + '?t=' + Date.now());
       if (fresh?.comments) applyLlm(fresh, posts);
       else if (s.data?.error) setWarn('Analisis gagal: ' + s.data.error);
       else setWarn('Analisis selesai, tetapi hasil tidak bisa dibaca.');
     }, 2000);
     return () => clearInterval(id);
-  }, [status?.running, applyLlm, posts]);
+  }, [status?.running, applyLlm, posts, project]);
 
   const topicLabel = useCallback((id) => {
     const t = topics.find((x) => x.id === Number(id));
@@ -197,7 +202,7 @@ export default function SentimentPage() {
     const r = await api('/api/analyze', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ limit: Math.max(0, Number(limit) || 0) }),
+      body: JSON.stringify({ project, limit: Math.max(0, Number(limit) || 0) }),
     });
     if (!r.ok) {
       if (r.status === 404 || r.status === 501) setWarn('Server analisis tidak tersedia. Jalankan ./run.sh serve lalu buka halaman ini di http://localhost:8000/sentimen.html.');
@@ -205,7 +210,7 @@ export default function SentimentPage() {
       return;
     }
     setWarn('');
-    const s = await api('/api/status');
+    const s = await api('/api/status?project=' + encodeURIComponent(project));
     if (s.ok) setStatus(s.data);
   };
 
@@ -261,7 +266,9 @@ export default function SentimentPage() {
   const maxCloud = keywords[0]?.[1] || 1;
 
   return (
-    <Layout page="sentimen" title="Analisis Sentimen" subtitle="Label sentimen, emosi, topik, dan toksisitas per komentar" actions={actions}>
+    <Layout page="sentimen" title="Analisis Sentimen"
+      subtitle={`Proyek ${project} · label sentimen, emosi, topik, dan toksisitas per komentar`}
+      actions={actions}>
       {status?.running && (
         <div className="card mb-4 p-3">
           <div className="mb-2 text-xs text-slate-600 dark:text-gray-300">

@@ -108,7 +108,8 @@ Checklist dari saran yang disetujui. Selesai semua pada sesi ini.
 - [x] Test baru: timestamp (network/DOM/estimasi), merge parsial vs lengkap, pohon balasan, token 401, dan origin 403.
 
 ## Verifikasi
-- `./run.sh test` → 34 test Python + 23 test Node lulus (termasuk 12 test API scraping dengan stub)
+- `./run.sh test` → 41 test Python + 23 test Node lulus (termasuk 14 test API scraping dengan stub dan 5 test penyimpanan proyek)
+- Playwright proyek per proyek (15 pemeriksaan lulus): Ringkasan memuat `/projects/default/data.json`, pemilih proyek di header, sidebar mempertahankan `?project=`, tampilan 11 post, kartu "0 · Proyek" di Pengumpulan Data, buat proyek lewat browser → buka lewat URL → hapus proyek
 - Playwright: `/`, `/ringkasan.html`, `/index.html`, `/viewer.html`, `/sentimen.html`, `/scrape.html` tanpa page error; desktop 1440 px dan ponsel 390 px tanpa overflow horizontal
 - Playwright viewer data nyata: 32 pemeriksaan lulus (tab, pagination, lipat diskusi, pencarian, `?focus=`, bucket, replay, layar penuh)
 - Playwright fixture pohon balasan: urutan akar → anak → cucu, indentasi 12/24 px, label tujuan balasan, dan “(perkiraan)” tampil; 9 pemeriksaan lulus
@@ -121,6 +122,15 @@ Checklist dari saran yang disetujui. Selesai semua pada sesi ini.
 - Filter tanggal & toggle co-comment sudah diuji terhadap data nyata
 - Uji browser headless time-lapse: play/jeda stabil, scrub 60 → 60/903, kembali ke akhir → 903/903 tanpa page error
 - Uji browser headless laporan: SVG mengandung judul/legenda/statistik/aktor teratas; PNG laporan 6000 px tanpa page error
+
+## Data per proyek (selesai)
+- [x] Modul terpusat `projects.py`: slug `[a-z0-9-]` (maks 41, selalu mulai alnum), `project_dir` menolak path traversal, penulisan atomik, `index.json`, dan daftar proyek dibaca dari isi folder `projects/<slug>/`.
+- [x] Satu proyek = `projects/<slug>/{meta.json, data.json, llm_analysis.json, failed.json, scrape_progress.json, llm_progress.json}`; `.trash/` untuk proyek dihapus (bisa dipulihkan manual).
+- [x] Migrasi otomatis: server pertama kali membuat proyek `default` dari `data.json`/`llm_analysis.json`/`failed.json` lama dengan **menyalin** (file lama tetap aman).
+- [x] Server: `?project=<slug>` untuk GET status/scrape/data; `project` di body untuk POST analyze/scrape/start dan CRUD `/api/projects{,/rename,/delete}`; slug tidak valid → 400; proyek tidak ada → 404; berkas proyek hanya `data.json` & `llm_analysis.json` yang disajikan (whitelist ketat, anti path traversal).
+- [x] Scraper & LLM menerima `--project`; `./run.sh analyze` default proyek `default` (`PROJECT=nama ./run.sh analyze`); halaman React (`Layout`, `GlobalSearch`, Ringkasan, Peta, Sentimen, Pengumpulan Data) memuat proyek aktif via `?project=` + `localStorage`, dengan pemilih proyek di header dan kartu "0 · Proyek" di halaman Pengumpulan Data.
+- [x] Tes: `tests/test_projects.py` (5 test) + `tests/test_scrape_api.py` dialihkan ke direktori proyek sementara; 41 test Python + 23 test Node lulus; Playwright 15 pemeriksaan (Ringkasan/Peta/Sentimen/Pengumpulan Data, buat→buka→hapus proyek lewat browser) lulus.
+- [x] Penyimpanan tetap JSON (bukan SQLite) — data masih kecil; `projects.py` menjadi satu-satunya lapisan bila nanti perlu pindah.
 
 ## Roadmap perbaikan berikutnya
 

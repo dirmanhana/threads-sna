@@ -36,30 +36,53 @@ Untuk fitur analisis konten berbasis LLM, salin `.env.example` menjadi `.env` la
                                             # peta: http://localhost:8000/viewer.html
                                             # sentimen: http://localhost:8000/sentimen.html
                                             # data: http://localhost:8000/scrape.html
-./run.sh migrate                            # migrasi data.json lama ke schema baru
-./run.sh analyze                            # analisis konten via LLM -> llm_analysis.json
+./run.sh migrate                            # migrasi data.json lama ke schema baru (satu file; --src bisa menunjuk projects/<slug>/data.json)
+./run.sh analyze                            # analisis proyek `default` (variabel PROJECT=nama untuk proyek lain)
 ./run.sh analyze --limit 100 --dry-run      # cek rencana tanpa panggil API
 ./run.sh test                               # unit test (Python + Node)
 ```
 
 Opsi lanjutan lewat `scrape_threads.py` langsung: `--out`, `--delay` (jeda dasar antar postingan, detik), `--max-replies`, `--profile-dir`, `--show`. Lewat `run.sh` bisa diatur dengan env: `OUT=nama.json DELAY=5 PROFILE_DIR=./akun_lain ./run.sh keyword "umkm"`.
 
-Hasil disimpan ke `data.json` dan **digabung** dengan data lama (berdasarkan kode postingan). Saat opsi gabung aktif, komentar yang sudah ada tidak dibuang walaupun tidak terlihat lagi pada scrape baru; item seperti itu hanya ditandai `still_present: false` bila scrape baru benar-benar lengkap. URL yang gagal dicatat ke `failed.json`. Jika semua postingan gagal dibaca, file hasil tidak ditimpa dan akan muncul peringatan kemungkinan sesi login kedaluwarsa.
+Hasil disimpan ke `projects/default/data.json` (per proyek) dan **digabung** dengan data lama (berdasarkan kode postingan). Saat opsi gabung aktif, komentar yang sudah ada tidak dibuang walaupun tidak terlihat lagi pada scrape baru; item seperti itu hanya ditandai `still_present: false` bila scrape baru benar-benar lengkap. URL yang gagal dicatat ke `failed.json`. Jika semua postingan gagal dibaca, file hasil tidak ditimpa dan akan muncul peringatan kemungkinan sesi login kedaluwarsa.
 
 ### Pengumpulan data dari browser (tanpa terminal)
 
 Jalankan `./run.sh serve` sekali, lalu buka **`http://localhost:8000/scrape.html`**. Halaman "Pengumpulan Data" di sidebar menyediakan alur lengkap:
 
 1. **Login** — tombol "Buka browser login" menyuruh server lokal membuka Chromium tampak. Login manual di jendela itu; deteksi cookie `.threads.com` berjalan otomatis. Tombol "Saya sudah login" hanya fallback. Sesi tersimpan di `threads_profile/` (gitignored) dan **tidak pernah dikirim ke browser**.
-2. **Ambil data** — pilih profil / kata kunci / URL postingan, jumlah postingan, batas komentar, dan opsi **gabungkan atau timpa** data lama. Opsi timpa tetap membuat backup `data.json.bak` sebelum menulis.
+2. **Ambil data** — pilih proyek (atau buat baru di kartu "0 · Proyek"), lalu pilih profil / kata kunci / URL postingan, jumlah postingan, batas komentar, dan opsi **gabungkan atau timpa** data lama. Opsi timpa tetap membuat backup `data.json.bak` di folder proyek sebelum menulis.
 3. **Pantau progres** — jumlah postingan yang selesai, pesan, dan log ditampilkan langsung. Job berjalan di server, jadi halaman boleh ditutup dan dibuka lagi.
-4. **Pakai hasilnya** — tombol "Buka di peta jaringan" memuat `data.json` yang baru.
+4. **Pakai hasilnya** — tombol "Buka di peta jaringan" memuat `projects/<slug>/data.json` yang baru.
 
 Catatan: scraper tetap memakai Playwright sungguhan, jadi **login pertama memerlukan desktop dengan tampilan Chromium**. Di server headless murni, lakukan `./run.sh login` sekali lewat terminal. Endpoint hanya di-bind ke `127.0.0.1` — jangan diubah ke `0.0.0.0` karena itu akan memungkinkan pihak lain memicu browser dengan sesi Anda.
 
-API yang dipakai halaman ini: `GET /api/scrape/status`, `POST /api/scrape/start`, `/api/scrape/cancel`, `GET /api/login/status`, `POST /api/login/start`, `/api/login/confirm`, `/api/login/cancel`. `scrape_progress.json`, `login_progress.json`, dan `login_selesai.marker` adalah file sementara (gitignored) dan diblokir dari akses statis.
+API yang dipakai halaman ini: `GET /api/scrape/status`, `POST /api/scrape/start`, `/api/scrape/cancel`, `GET /api/login/status`, `POST /api/login/start`, `/api/login/confirm`, `/api/login/cancel`, `GET /api/projects`, `POST /api/projects`, `/api/projects/rename`, `/api/projects/delete`. `scrape_progress.json`, `login_progress.json`, dan `login_selesai.marker` adalah file sementara (gitignored) dan diblokir dari akses statis. Semua endpoint penerima parameter `?project=<slug>` (atau field `project` di body) berjalan untuk proyek yang dipilih; proyek `default` dipakai bila tidak disebutkan.
 
 **Keamanan API lokal:** semua `POST` wajib membawa header `X-SNA-Token` yang diberikan `GET /api/session` saat halaman dimuat; browser mengambilnya otomatis. Server juga menolak `Host` non-loopback (anti DNS rebinding) dan `Origin` lintas situs (anti CSRF). Token dibuat acak setiap server dijalankan dan tidak pernah ditulis ke disk atau dikirim ke layanan lain. Ini lapisan tambahan, bukan pengganti aturan tetap: server hanya boleh di-bind ke `127.0.0.1`.
+
+## Penyimpanan per proyek
+
+Semua data penelitian disimpan **per proyek**, bukan lagi dalam satu berkas di root. Saat server pertama kali dijalankan, `data.json`/`llm_analysis.json` lama otomatis **disalin** (bukan dipindahkan) ke proyek `default`; file lama tetap ada sebagai cadangan.
+
+```
+projects/
+  index.json                daftar proyek (slug, nama, waktu)
+  default/
+    meta.json               nama, slug, waktu dibuat/diperbarui
+    data.json               postingan + komentar (gitignored)
+    llm_analysis.json       hasil analisis LLM (gitignored, opsional)
+    failed.json             URL gagal scrape (gitignored, opsional)
+    scrape_progress.json    progres scraping sementara (gitignored)
+    llm_progress.json       progres analisis LLM sementara (gitignored)
+  .trash/                   proyek yang "dihapus" dipindahkan ke sini, bukan lenyap
+```
+
+- Kelola proyek di halaman **Pengumpulan Data** (buat/ganti nama/hapus) atau lewat pemilih proyek di header. Semua halaman (Ringkasan, Peta Jaringan, Sentimen) mengikuti proyek aktif lewat parameter `?project=<slug>`; pilihan juga disimpan di `localStorage`.
+- Slug hanya huruf kecil/angka/tanda hubung (`default`, `pendukung-a`); server menolak slug lain dan path traversal.
+- Berkas yang boleh diakses peramban hanya `data.json` dan `llm_analysis.json` di dalam folder proyek; `meta.json`, progres, dan `failed.json` diblokir. File lintas-proyek dicegah lewat whitelist ketat.
+- Penyimpanan **masih berupa JSON** (bukan SQLite) karena data masih kecil (≈0,3 MB) dan viewer berjalan client-side. Modul terpusat `projects.py` menangani list/create/load/save; jika nanti data tumbuh besar (puluhan MB atau >10 ribu komentar), peralihan ke SQLite cukup di lapisan ini.
+- `./run.sh analyze` default ke proyek `default`; pakai `PROJECT=nama-proyek ./run.sh analyze` untuk proyek lain, atau `python llm_analyze.py --project nama-proyek`. Tes dan file root lama tetap berfungsi.
 
 ## Schema `data.json`
 
@@ -132,7 +155,7 @@ Ketiga halaman sekarang adalah satu aplikasi React + Vite + Tailwind CSS v4 yang
 
 Header memuat **pencarian global** akun/postingan; memilih hasil membuka `/viewer.html?focus=<akun>` dan langsung memfokuskan akun itu. Toggle tema ada di header, dan sidebar bisa diringkas (80 px) atau dilebarkan (256 px).
 
-`llm_server.py` menyajikan `dist/` bila sudah dibangun: `/`, `/index.html`, `/ringkasan.html`, `/viewer.html`, `/sentimen.html`, dan `/scrape.html` memuat `index.html` yang sama, aset dari `/assets/`, sementara `data.json` dan `llm_analysis.json` tetap dibaca dari root proyek. Sebelum `npm run build`, server fallback ke file HTML lama. `node_modules/` dan `dist/` tidak masuk git. Server yang sama juga menjadi API lokal untuk analisis LLM **dan** pengumpulan data.
+`llm_server.py` menyajikan `dist/` bila sudah dibangun: `/`, `/index.html`, `/ringkasan.html`, `/viewer.html`, `/sentimen.html`, dan `/scrape.html` memuat `index.html` yang sama, aset dari `/assets/`, sementara `data.json` dan `llm_analysis.json` per proyek disajikan dari `projects/<slug>/` (hanya dua nama berkas itu yang boleh diakses, dan hanya dari folder proyek yang valid). Sebelum `npm run build`, server fallback ke file HTML lama. `node_modules/` dan `dist/` tidak masuk git. Server yang sama juga menjadi API lokal untuk analisis LLM **dan** pengumpulan data.
 
 ## Analisis konten (LLM)
 
@@ -143,7 +166,7 @@ cp .env.example .env          # lalu isi LLM_API_KEY (dan base URL/model bila pe
 ./run.sh serve                # otomatis menyalakan server lokal + buka http://localhost:8000/sentimen.html
 # lalu klik tombol ▶ Jalankan analisis di halaman tersebut
 
-./run.sh analyze              # alternatif lewat terminal: baca data.json -> llm_analysis.json
+./run.sh analyze              # alternatif lewat terminal: baca proyek `default` -> llm_analysis.json
 ./run.sh analyze --limit 100  # hanya 100 komentar pertama (uji cepat)
 ./run.sh analyze --dry-run    # lihat rencana tanpa memanggil API
 ```

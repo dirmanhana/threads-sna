@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { getJson } from '../lib/utils.js';
+import { currentProject, projectFile, withProject } from '../lib/project.js';
 
 const MAX_PER_GROUP = 5;
 
@@ -9,7 +10,7 @@ function useData() {
   const load = async () => {
     if (posts || loading) return;
     setLoading(true);
-    const d = await getJson('data.json');
+    const d = await getJson(projectFile('data.json', currentProject()));
     const list = Array.isArray(d) ? d : (Array.isArray(d?.posts) ? d.posts : []);
     setPosts(list);
     setLoading(false);
@@ -75,7 +76,7 @@ export default function GlobalSearch() {
   const go = (item) => {
     if (!item) return;
     const focus = item.kind === 'akun' ? item.key : item.label.replace(/^@/, '');
-    globalThis.location.href = `/viewer.html?focus=${encodeURIComponent(focus)}`;
+    globalThis.location.href = withProject(`/viewer.html?focus=${encodeURIComponent(focus)}`);
   };
 
   const onKeyDown = (e) => {
@@ -89,7 +90,7 @@ export default function GlobalSearch() {
   const hasResults = results.accounts.length > 0 || results.posts.length > 0;
 
   return (
-    <div ref={boxRef} className="relative w-full max-w-md">
+    <div ref={boxRef} className="relative w-full min-w-0 max-w-md">
       <div className="relative">
         <svg className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
           <path d="M10 4a6 6 0 1 0 3.5 10.9l4.3 4.3 1.4-1.4-4.3-4.3A6 6 0 0 0 10 4Zm0 2a4 4 0 1 1 0 8 4 4 0 0 1 0-8Z" />
@@ -109,7 +110,7 @@ export default function GlobalSearch() {
 
       {open && q.trim() && (
         <div className="absolute left-0 right-0 top-full z-50 mt-1 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-lg dark:border-gray-700 dark:bg-gray-800">
-          {loading && <div className="px-3 py-3 text-xs text-slate-500 dark:text-gray-400">Memuat data.json…</div>}
+          {loading && <div className="px-3 py-3 text-xs text-slate-500 dark:text-gray-400">Memuat data proyek…</div>}
           {!loading && !hasResults && (
             <div className="px-3 py-3 text-xs text-slate-500 dark:text-gray-400">Tidak ada hasil untuk “{q.trim()}”.</div>
           )}

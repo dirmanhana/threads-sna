@@ -3,6 +3,7 @@ import PageHeader from './PageHeader.jsx';
 import GlobalSearch from './GlobalSearch.jsx';
 import StatusPill from './StatusPill.jsx';
 import { api } from '../lib/utils.js';
+import { currentProject, switchProject, withProject } from '../lib/project.js';
 
 const Icon = ({ d, className = 'w-4 h-4' }) => (
   <svg className={className} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
@@ -58,6 +59,7 @@ function NavItem({ href, active, icon, label, expanded }) {
 }
 
 function Sidebar({ page, expanded, setExpanded, open, setOpen }) {
+  const project = currentProject();
   return (
     <>
       {open && (
@@ -69,7 +71,7 @@ function Sidebar({ page, expanded, setExpanded, open, setOpen }) {
           ${open ? 'translate-x-0 w-64' : '-translate-x-full w-64'} lg:w-20 ${expanded ? 'lg:w-64' : ''}`}
       >
         <div className={`mb-6 flex items-center ${expanded ? 'justify-between px-1' : 'justify-center lg:justify-center'}`}>
-          <a href="/" className="flex items-center gap-2 text-brand-600" title="Ringkasan">
+          <a href={withProject('/', project)} className="flex items-center gap-2 text-brand-600" title="Ringkasan">
             <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-brand-600 text-sm font-bold text-white">SNA</span>
             <span className={`text-sm font-bold tracking-tight text-slate-800 dark:text-white ${expanded ? '' : 'lg:hidden'}`}>
               Threads SNA
@@ -88,7 +90,8 @@ function Sidebar({ page, expanded, setExpanded, open, setOpen }) {
               </p>
               <div className="space-y-1">
                 {group.items.map((item) => (
-                  <NavItem key={item.href} {...item} active={page === item.page} expanded={expanded} />
+                  <NavItem key={item.href} {...item} href={withProject(item.href, project)}
+                    active={page === item.page} expanded={expanded} />
                 ))}
               </div>
             </div>
@@ -96,6 +99,16 @@ function Sidebar({ page, expanded, setExpanded, open, setOpen }) {
         </nav>
 
         <div className="mt-auto space-y-1 border-t border-slate-100 pt-3 dark:border-gray-700/60">
+          <a
+            href={withProject('/scrape.html', project)}
+            className={`flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-slate-500 hover:bg-slate-100 dark:text-gray-400 dark:hover:bg-gray-700/60 ${expanded ? '' : 'lg:justify-center lg:px-0'}`}
+            title={`Proyek aktif: ${project}`}
+          >
+            <span className="grid h-4 w-4 shrink-0 place-items-center rounded bg-brand-100 text-[9px] font-bold text-brand-700 dark:bg-brand-500/20 dark:text-brand-300">
+              {project.slice(0, 1).toUpperCase()}
+            </span>
+            <span className={`truncate text-xs ${expanded ? '' : 'lg:hidden'}`}>{project}</span>
+          </a>
           <button
             onClick={() => setExpanded(!expanded)}
             className={`hidden w-full items-center gap-3 rounded-lg px-3 py-2 text-sm text-slate-500 hover:bg-slate-100 lg:flex dark:text-gray-400 dark:hover:bg-gray-700/60 ${expanded ? '' : 'lg:justify-center lg:px-0'}`}
@@ -111,12 +124,52 @@ function Sidebar({ page, expanded, setExpanded, open, setOpen }) {
   );
 }
 
+function ProjectPicker() {
+  const active = currentProject();
+  const [projects, setProjects] = useState([]);
+
+  useEffect(() => {
+    let alive = true;
+    api('/api/projects').then((r) => {
+      if (alive && r.ok) setProjects(Array.isArray(r.data?.projects) ? r.data.projects : []);
+    });
+    return () => { alive = false; };
+  }, []);
+
+  const list = projects.length ? projects : [{ slug: active, name: active }];
+  if (!list.some((p) => p.slug === active)) list.unshift({ slug: active, name: active });
+
+  return (
+    <div className="flex min-w-0 items-center gap-1.5">
+      <span className="hidden text-[10px] font-semibold uppercase tracking-wider text-slate-400 lg:inline">Proyek</span>
+      <select
+        className="h-9 w-[104px] min-w-0 rounded-lg border border-slate-200 bg-slate-50 px-2 text-xs text-slate-700 outline-none focus:border-brand-400 focus:ring-2 focus:ring-brand-100 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100 sm:w-auto sm:max-w-[190px]"
+        value={active}
+        onChange={(e) => switchProject(e.target.value)}
+        aria-label="Pilih proyek"
+        title={list.find((p) => p.slug === active)?.name || active}
+      >
+        {list.map((p) => (
+          <option key={p.slug} value={p.slug}>
+            {p.name}{Number.isFinite(p.posts) ? ` · ${p.posts}` : ''}
+          </option>
+        ))}
+      </select>
+      <a href={withProject('/scrape.html', active)} title="Kelola proyek"
+        className="grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-slate-200 text-slate-500 hover:border-brand-300 hover:text-brand-600 dark:border-gray-700 dark:text-gray-400">
+        <span className="text-base leading-none">＋</span>
+      </a>
+    </div>
+  );
+}
+
 function DataStatus() {
+  const project = currentProject();
   const [status, setStatus] = useState(null);
   useEffect(() => {
     let alive = true;
     const load = async () => {
-      const r = await api('/api/scrape/status');
+      const r = await api('/api/scrape/status?project=' + encodeURIComponent(project));
       if (!alive) return;
       if (r.ok && r.data) setStatus(r.data);
       else setStatus({ offline: true });
@@ -124,7 +177,7 @@ function DataStatus() {
     load();
     const id = setInterval(load, 30000);
     return () => { alive = false; clearInterval(id); };
-  }, []);
+  }, [project]);
 
   if (!status) {
     return <StatusPill tone="slate" className="hidden sm:inline-flex">Memuat…</StatusPill>;
@@ -169,6 +222,7 @@ export default function Layout({ page, title, subtitle, meta, children, actions,
             </button>
             <GlobalSearch />
             <div className="ml-auto flex shrink-0 items-center gap-2">
+              <ProjectPicker />
               <DataStatus />
               <button
                 onClick={() => setDark(!dark)}
