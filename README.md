@@ -52,10 +52,12 @@ Data lama (sebelum schema ini) bisa dimigrasi dengan `./run.sh migrate`. Backup 
 - **Node** = akun. Hijau = pernah memosting, abu = hanya berkomentar. Ukuran mengikuti derajat.
 - **Edge**: biru = komentar, oranye = mention `@akun`, ungu = co-comment (dua akun komentar di postingan yang sama; harus diaktifkan).
 - Klik node/link untuk detail. Tooltip saat hover. Klik node untuk fokus (tetangga tetap terang); tombol **Isolasi** menampilkan ego-network saja.
+- Nama akun di tabel metrik, daftar aktor, kartu postingan, dan detail link bisa diklik → membuka postingan asli di Threads (tab baru). Untuk akun yang hanya berkomentar, tautan mengarah ke postingan tempat ia berpartisipasi; tombol **Buka di Threads** di panel melakukan hal yang sama.
+- **Layar penuh** menyembunyikan header, filter, dan panel sehingga hanya peta jaringan yang tampil. Keluar lewat tombol mengambang kanan-atas atau `Esc`.
 - Kolom pencarian: saring postingan/komentar/akun, graf ikut berubah, kata kunci disorot.
 - Filter: toggle jenis edge, slider derajat minimum, rentang tanggal, warna node per komunitas, dropdown loncat ke akun.
 - Panel: peringkat **degree / betweenness / closeness / eigenvector**, ringkasan komunitas Louvain, dan semua postingan.
-- Ekspor: CSV node, CSV edge, GraphML (Gephi), PNG, SVG. Tombol **Reset zoom** mengembalikan viewport.
+- Ekspor: CSV node, CSV edge, GraphML (Gephi), PNG, SVG. PNG/SVG mengikuti **seluruh graf** (bbox node + label), tidak terpotong oleh viewport dan tidak dipengaruhi zoom; **Reset zoom** mengembalikan viewport.
 - Viewer memuat `data.json` otomatis; tanpa file itu, data contoh tampil dengan banner peringatan. Bisa juga tombol **Muat data.json**.
 - Logika graf murni (build, metrik, Louvain) ada di `viewer_core.js`; bisa dipakai dari Node lewat `require('./viewer_core.js')`.
 

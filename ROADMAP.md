@@ -28,6 +28,11 @@ Checklist dari saran yang disetujui. Selesai semua pada sesi ini.
 - [x] Unit test untuk `clean()`/`parse_item()` (8 test Python) dan logika graf (12 test Node)
 - [x] Perbarui README (schema, flags, fitur) + `.gitignore`
 
+## Fitur tambahan (permintaan lanjutan)
+- [x] Nama user di tabel/daftar/kartu/detail link diklik → buka postingan asli di Threads (tab baru). Fallback ke postingan partisipasi bagi commenter.
+- [x] Ekspor PNG/SVG full-graph: hitung bbox semua node + label, lepas transform zoom, tidak terpotong pada kondisi default/reset zoom.
+- [x] Mode layar penuh: hanya peta jaringan; tombol **Layar penuh**, keluar via tombol mengambang atau `Esc`.
+
 ## Perbaikan lanjutan
 - [x] Bug: akun yang hanya disebut (@mention) tidak punya node → `d3.forceLink` melempar `node not found`, yang salah dilaporkan sebagai "Gagal memuat data.json" / "JSON tidak valid"
 - [x] Pisahkan error parse JSON vs error render di banner viewer; beri petunjuk `./run.sh serve` kalau `fetch` diblokir

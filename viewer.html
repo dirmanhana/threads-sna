@@ -31,6 +31,14 @@ text{fill:var(--fg);font-size:11px;pointer-events:none}
 .mt{border-collapse:collapse;width:100%;font-size:11px;table-layout:fixed}
 .mt th,.mt td{border:1px solid var(--bd);padding:3px 4px;text-align:left;vertical-align:top;word-break:break-word}
 .acts{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0}
+a.ul{color:inherit;text-decoration:none;border-bottom:1px dotted var(--mut)}
+a.ul:hover{color:var(--c1);border-bottom-color:var(--c1)}
+body.fs header,body.fs .ctl,body.fs aside,body.fs #warn{display:none!important}
+body.fs main{display:block}
+body.fs #svg{width:100%;height:100%;display:block}
+body.fs #tip{z-index:999}
+#fsExit{display:none;position:fixed;top:12px;right:12px;z-index:100;background:var(--card);color:var(--fg);border:1px solid var(--bd);border-radius:8px;padding:6px 10px;cursor:pointer;font:inherit}
+body.fs #fsExit{display:block}
 details.exp{position:relative}
 details.exp .menu{position:absolute;right:0;top:100%;z-index:20;background:var(--card);border:1px solid var(--bd);border-radius:8px;padding:8px;display:flex;flex-direction:column;gap:6px;min-width:132px;box-shadow:0 4px 16px #0003}
 </style></head><body>
@@ -39,6 +47,7 @@ details.exp .menu{position:absolute;right:0;top:100%;z-index:20;background:var(-
 <label class="btn">Muat data.json<input id="f" type="file" accept=".json" hidden></label>
 <button id="rs">Reset pilihan</button>
 <button id="rz">Reset zoom</button>
+<button id="fs" title="Tampilkan peta jaringan saja">Layar penuh</button>
 <select id="colorBy" title="Warna node"><option value="peran">Warna: Peran</option><option value="komunitas">Warna: Komunitas</option></select>
 <span class="lg"><i style="background:var(--c1)"></i>komentar<i style="background:var(--c2)"></i>mention<i style="background:var(--c4)"></i>co-comment</span>
 <details class="exp"><summary>Ekspor</summary><div class="menu">
@@ -58,6 +67,7 @@ details.exp .menu{position:absolute;right:0;top:100%;z-index:20;background:var(-
 </div>
 <main><svg id="svg"></svg><aside id="pn"></aside></main>
 <div id="tip" hidden></div>
+<button id="fsExit" title="Keluar layar penuh (Esc)">Keluar layar penuh ✕</button>
 <script src="vendor/d3.min.js"></script>
 <script>window.d3||document.write('<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.9.0/d3.min.js"><\/script>')</script>
 <script src="viewer_core.js"></script>
@@ -78,6 +88,31 @@ const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;'
 const eid=v=>v&&typeof v==='object'?String(v.id==null?'':v.id):String(v==null?'':v);
 const fmt=v=>Number(v||0).toFixed(3);
 const cmp=(a,b)=>a<b?-1:a>b?1:0;
+const BASE_URL='https://www.threads.com';
+const safeUrl=u=>{try{const x=new URL(String(u||''),location.href);
+  return (x.protocol==='http:'||x.protocol==='https:')?x.href:null}catch(e){return null}};
+const postUrl=p=>p?(safeUrl(p.url)||(p.author&&p.code
+  ?BASE_URL+'/@'+encodeURIComponent(p.author)+'/post/'+encodeURIComponent(p.code):null)):null;
+const itemUrl=(it,p)=>(it&&it.author&&it.code
+  ?BASE_URL+'/@'+encodeURIComponent(it.author)+'/post/'+encodeURIComponent(it.code)
+  :postUrl(p));
+function authorUrl(id){
+  const own=posts.find(p=>p.author===id&&postUrl(p));
+  if(own)return postUrl(own);
+  // Akun yang hanya berkomentar: arahkan ke postingan tempat ia berpartisipasi.
+  for(const p of posts){
+    for(const r of [...(p.replies||[]),...(p.thread||[])]){
+      if(r.author===id){const u=itemUrl(r,p);if(u)return u}
+    }
+  }
+  return BASE_URL+'/@'+encodeURIComponent(id||'');
+}
+function linkUser(id,label,url){
+  const href=safeUrl(url)||BASE_URL+'/@'+encodeURIComponent(id||'');
+  return '<a class="ul" href="'+esc(href)+'" target="_blank" rel="noopener noreferrer" '
+    +'title="Buka di Threads">'+esc(label==null?'@'+id:label)+'</a>';
+}
+const userLink=id=>linkUser(id,'@'+id,authorUrl(id));
 
 const state={types:new Set(['komentar','mention']),minDeg:1,dateFrom:'',dateTo:''};
 let all=[],posts=[],sim,kw='',graph=null,metrics=null,focus=null,isolate=false,panelUser=null,zoom=null,colorBy='peran',tm;
@@ -132,6 +167,29 @@ function visibleGraph(){
           links:graph.links.filter(l=>ids.has(eid(l.source))&&ids.has(eid(l.target)))};
 }
 function redraw(){draw(visibleGraph()||{nodes:[],links:[]})}
+function redrawKeep(){
+  const g=visibleGraph()||{nodes:[],links:[]};
+  const pos=new Map((graph&&graph.nodes||[]).map(n=>[n.id,{x:n.x,y:n.y,vx:n.vx,vy:n.vy,fx:n.fx,fy:n.fy}]));
+  draw(g);
+  g.nodes.forEach(n=>{const p=pos.get(n.id);if(p&&Number.isFinite(p.x)){
+    n.x=p.x;n.y=p.y;n.vx=p.vx||0;n.vy=p.vy||0;n.fx=p.fx;n.fy=p.fy}});
+  if(sim)sim.alpha(.25).restart();
+}
+function setFullscreen(on,api=true){
+  document.body.classList.toggle('fs',on);
+  const b=$('#fs');if(b)b.textContent=on?'Keluar layar penuh':'Layar penuh';
+  if(api){try{
+    if(on&&document.documentElement.requestFullscreen)document.documentElement.requestFullscreen().catch(()=>{});
+    else if(!on&&document.fullscreenElement&&document.exitFullscreen)document.exitFullscreen().catch(()=>{});
+  }catch(e){}}
+  requestAnimationFrame(()=>{redrawKeep();if(!on)setTimeout(redrawKeep,80)});
+}
+document.addEventListener('fullscreenchange',()=>{
+  if(!document.fullscreenElement&&document.body.classList.contains('fs'))setFullscreen(false,false);
+});
+document.addEventListener('keydown',e=>{
+  if(e.key==='Escape'&&document.body.classList.contains('fs'))setFullscreen(false);
+});
 
 function showTip(html,e){
   const t=$('#tip');t.innerHTML=html;t.hidden=false;
@@ -215,13 +273,13 @@ function postCard(p,only){
   const badges=[p.timestamp?'<span class="tag">🗓 '+esc(p.timestamp)+'</span>':'',
                 Number.isFinite(p.likes)?'<span class="tag">♥ '+p.likes+'</span>':''].join(' ');
   const th=(p.thread||[]).filter(t=>!only||t.author===only).map(t=>
-    '<div class="rp th"><span class="tag">thread</span> <b>@'+esc(t.author)+'</b>: '+hl(t.text)+
+    '<div class="rp th"><span class="tag">thread</span> <b>'+linkUser(t.author,'@'+t.author,itemUrl(t,p))+'</b>: '+hl(t.text)+
     (t.timestamp?' <span class="tag">'+esc(t.timestamp)+'</span>':'')+'</div>').join('');
   const rp=(p.replies||[]).filter(r=>!only||r.author===only).map(r=>
-    '<div class="rp"><span class="tag">komentar</span> <b>@'+esc(r.author)+'</b>: '+hl(r.text)+
+    '<div class="rp"><span class="tag">komentar</span> <b>'+linkUser(r.author,'@'+r.author,itemUrl(r,p))+'</b>: '+hl(r.text)+
     (r.timestamp?' <span class="tag">'+esc(r.timestamp)+'</span>':'')+'</div>').join('');
-  return '<div class="card"><b>@'+esc(p.author)+'</b> <span class="tag">'+
-    (only?'(dikomentari @'+esc(only)+')':'memposting')+'</span> '+badges+
+  return '<div class="card"><b>'+linkUser(p.author,'@'+p.author,postUrl(p))+'</b> <span class="tag">'+
+    (only?'(dikomentari '+userLink(only)+')':'memposting')+'</span> '+badges+
     '<div class="txt" title="'+esc(txt)+'">'+hl(txt)+'</div>'+th+rp+'</div>';
 }
 function metricTable(){
@@ -231,7 +289,7 @@ function metricTable(){
   const rows=defs.map(([name,map,f3])=>{
     const top=[...map.entries()].sort((a,b)=>b[1]-a[1]||cmp(String(a[0]),String(b[0]))).slice(0,5);
     let cells='';
-    for(let i=0;i<5;i++)cells+='<td>'+(top[i]?'@'+esc(top[i][0])+' <span class="tag">'+(f3?fmt(top[i][1]):top[i][1])+'</span>':'-')+'</td>';
+    for(let i=0;i<5;i++)cells+='<td>'+(top[i]?userLink(top[i][0])+' <span class="tag">'+(f3?fmt(top[i][1]):top[i][1])+'</span>':'-')+'</td>';
     return '<tr><th>'+name+'</th>'+cells+'</tr>';
   }).join('');
   return '<h4>Metrik jaringan</h4><table class="mt"><tr><th>Metrik</th><th>1</th><th>2</th><th>3</th><th>4</th><th>5</th></tr>'+rows+'</table>';
@@ -240,7 +298,7 @@ function actorTop(){
   const ns=(graph&&graph.nodes)||[];
   const top=[...ns].sort((a,b)=>b.deg-a.deg||cmp(a.id,b.id)).slice(0,5);
   return '<h4>Aktor teratas</h4>'+(top.length?top.map(n=>
-    '<div class="tag">@'+esc(n.id)+' · '+n.deg+' relasi · '+n.posts+' post · '+n.replies+' komentar · '+n.threadCount+' thread</div>').join(''):'<div class="tag">-</div>');
+    '<div class="tag">'+userLink(n.id)+' · '+n.deg+' relasi · '+n.posts+' post · '+n.replies+' komentar · '+n.threadCount+' thread</div>').join(''):'<div class="tag">-</div>');
 }
 function communityBlock(){
   const sizes=SNA.communitySizes(metrics&&metrics.communities);
@@ -249,18 +307,20 @@ function communityBlock(){
     top.slice(0,5).map(([k,v])=>'<div class="tag">Komunitas '+k+': '+v+' akun</div>').join('');
 }
 function bindPanel(){
-  const f=$('#pFocus'),u=$('#pUnfocus'),i=$('#pIso');
+  const f=$('#pFocus'),u=$('#pUnfocus'),i=$('#pIso'),o=$('#pOpen');
   if(f)f.onclick=()=>{if(panelUser){focus=panelUser;isolate=false;setActor(focus);redraw();panel({user:focus})}};
   if(u)u.onclick=()=>{focus=null;isolate=false;setActor('');redraw();panel()};
   if(i)i.onclick=()=>{if(!panelUser)return;focus=panelUser;isolate=!isolate;setActor(focus);redraw();panel({user:panelUser})};
+  if(o)o.onclick=()=>{if(panelUser)window.open(authorUrl(panelUser),'_blank','noopener')};
 }
 function panel(o={}){
   const el=$('#pn');hideTip();
   if(o.link){
     const l=o.link,items=(l.items&&l.items.length?l.items:[{}]);
     panelUser=null;
-    el.innerHTML='<h4>@'+esc(eid(l.source))+' → @'+esc(eid(l.target))+' <span class="tag">'+esc(l.type)+', '+(l.w||0)+'×</span></h4>'+
-      items.map(it=>'<div class="card"><div>'+hl(it.text)+'</div><div class="tag">'+esc(it.author)+
+    el.innerHTML='<h4>'+userLink(eid(l.source))+' → '+userLink(eid(l.target))+' <span class="tag">'+esc(l.type)+', '+(l.w||0)+'×</span></h4>'+
+      items.map(it=>'<div class="card"><div>'+hl(it.text)+'</div><div class="tag">'+
+        linkUser(it.author,'@'+it.author,itemUrl(it,{code:it.postCode,author:it.author}))+
         ' · '+esc(it.postCode)+(it.timestamp?' · '+esc(it.timestamp):'')+'</div></div>').join('');
     return;
   }
@@ -270,11 +330,12 @@ function panel(o={}){
     const other=posts.filter(p=>p.author!==u&&((p.replies||[]).some(r=>r.author===u)||(p.thread||[]).some(t=>t.author===u)));
     const m=metrics||{degree:new Map(),betweenness:new Map(),closeness:new Map(),eigenvector:new Map(),communities:new Map()};
     const c=m.communities.get(u);
-    el.innerHTML='<h4>@'+esc(u)+'</h4><div class="tag">Derajat '+(m.degree.get(u)||0)+
+    el.innerHTML='<h4>'+userLink(u)+'</h4><div class="tag">Derajat '+(m.degree.get(u)||0)+
       ' · komunitas '+(c==null?'-':c)+' · betweenness '+fmt(m.betweenness.get(u))+
       ' · closeness '+fmt(m.closeness.get(u))+' · eigenvector '+fmt(m.eigenvector.get(u))+'</div>'+
       '<div class="acts"><button id="pFocus">Fokus</button><button id="pUnfocus">Lepaskan fokus</button>'+
-      '<button id="pIso">'+(isolate?'Tampilkan semua':'Isolasi')+'</button></div>'+
+      '<button id="pIso">'+(isolate?'Tampilkan semua':'Isolasi')+'</button>'+
+      '<button id="pOpen">Buka di Threads ↗</button></div>'+
       (mine.length?'<h4>Postingan</h4>'+mine.map(p=>postCard(p)).join(''):'')+
       (other.length?'<h4>Dikomentari</h4>'+other.map(p=>postCard(p,u)).join(''):'');
     bindPanel();return;
@@ -343,10 +404,27 @@ function graphML(){
 }
 function svgForExport(){
   const src=$('#svg'),clone=src.cloneNode(true);
-  const W=src.clientWidth||960,H=src.clientHeight||600;
+  const vw=src.clientWidth||960,vh=src.clientHeight||600;
+  // Hitung bounding box seluruh node (koordinat lokal, sebelum zoom) supaya
+  // hasil unduh tidak terpotong walaupun viewport sedang zoom/default.
+  const g=visibleGraph()||{nodes:[],links:[]};
+  let x0=0,y0=0,x1=vw,y1=vh,have=false;
+  g.nodes.forEach(n=>{
+    const x=Number(n.x),y=Number(n.y);
+    if(!Number.isFinite(x)||!Number.isFinite(y))return;
+    const rr=6+Math.sqrt(n.deg||0)*3.5;
+    const tx=Math.max(30,String(n.id||'').length*6.5);
+    if(!have){x0=x-rr-tx;x1=x+rr+tx;y0=y-rr-tx-8;y1=y+rr+tx;have=true}
+    else{x0=Math.min(x0,x-rr-tx);x1=Math.max(x1,x+rr+tx);
+         y0=Math.min(y0,y-rr-tx-8);y1=Math.max(y1,y+rr+tx)}
+  });
+  const pad=24;
+  const X=x0-pad,Y=y0-pad,W=(x1-x0)+pad*2,H=(y1-y0)+pad*2;
+  const root=[...clone.children].find(el=>el.tagName==='g');
+  if(root)root.removeAttribute('transform');   // lepas zoom => seluruh graf masuk
   clone.setAttribute('xmlns','http://www.w3.org/2000/svg');
+  clone.setAttribute('viewBox',[X,Y,W,H].join(' '));
   clone.setAttribute('width',W);clone.setAttribute('height',H);
-  clone.setAttribute('viewBox','0 0 '+W+' '+H);
   const cs=getComputedStyle(document.documentElement);
   const get=v=>{const x=cs.getPropertyValue(v).trim();
     return x||({'--c1':'#378add','--c2':'#d85a30','--c3':'#1d9e75','--c4':'#8f6fd0','--fg':'#1a1a1a','--mut':'#6b6b6b'}[v]||'#888')};
@@ -375,8 +453,9 @@ function exportPNG(){
     const img=new Image();
     img.onload=()=>{
       try{
-        const cv=document.createElement('canvas'),scale=2;
-        cv.width=W*scale;cv.height=H*scale;
+        const cv=document.createElement('canvas');
+        const scale=Math.max(.25,Math.min(2,4000/Math.max(W,H)));
+        cv.width=Math.max(1,Math.round(W*scale));cv.height=Math.max(1,Math.round(H*scale));
         const ctx=cv.getContext('2d');ctx.scale(scale,scale);ctx.drawImage(img,0,0,W,H);
         cv.toBlob(b=>{if(b)download(b,'sna.png');else showWarn('Gagal membuat PNG.')},'image/png');
       }catch(err){showWarn('Gagal mengekspor PNG: '+(err&&err.message||err))}
@@ -394,7 +473,9 @@ function bindControls(){
   $('#minDeg').oninput=e=>{state.minDeg=Number(e.target.value)||0;$('#minDegVal').textContent=e.target.value;apply()};
   $('#dateFrom').onchange=e=>{state.dateFrom=e.target.value;apply()};
   $('#dateTo').onchange=e=>{state.dateTo=e.target.value;apply()};
-  $('#colorBy').onchange=e=>{colorBy=e.target.value;redraw();panel()};
+  $('#colorBy').onchange=e=>{colorBy=e.target.value;redrawKeep();panel()};
+  $('#fs').onclick=()=>setFullscreen(!document.body.classList.contains('fs'));
+  $('#fsExit').onclick=()=>setFullscreen(false);
   $('#actor').onchange=e=>{
     const id=e.target.value;
     if(!id){focus=null;isolate=false;redraw();panel();return}
