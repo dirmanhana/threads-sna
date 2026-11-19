@@ -25,7 +25,7 @@ export default function InfoPanel(props) {
   const uLink = (id) => userLink(posts, id);
   const html = (text) => ({ __html: hl(esc(text), keyword) });
 
-  function PostCard(p, only) {
+  function PostCard({ p, only }) {
     const txt = String(p.text == null ? '' : p.text);
     const badges = [
       p.timestamp ? `<span class="tag text-[11px] text-slate-400">🗓 ${esc(p.timestamp)}</span>` : '',
