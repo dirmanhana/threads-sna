@@ -122,6 +122,26 @@ Checklist dari saran yang disetujui. Selesai semua pada sesi ini.
 - Uji browser headless time-lapse: play/jeda stabil, scrub 60 → 60/903, kembali ke akhir → 903/903 tanpa page error
 - Uji browser headless laporan: SVG mengandung judul/legenda/statistik/aktor teratas; PNG laporan 6000 px tanpa page error
 
+## Roadmap perbaikan berikutnya
+
+Diurutkan berdasarkan prioritas. Nomor mengikuti paket saran scraping sebelumnya (1, 2, 4, 5 sudah selesai).
+
+### 3 · Checkpoint & pembatalan scraping — berikutnya
+- [ ] Simpan checkpoint per postingan ke `scrape_progress.json`: URL yang sudah selesai, antrean tersisa, dan waktu terakhir.
+- [ ] `POST /api/scrape/start` mendeteksi checkpoint dan menawarkan **lanjutkan** atau **mulai ulang**.
+- [ ] `POST /api/scrape/cancel` menghentikan scroll/retry dalam ≤5 detik dan menulis hasil parsial dengan aman.
+- [ ] Tombol **Batalkan** yang jelas di halaman Pengumpulan Data + status “dibatalkan sebagian”.
+- [ ] Job yang dibatalkan **tidak boleh** menandai `still_present: false` karena hasilnya parsial.
+- [ ] Tes: resume tidak mengulang postingan selesai; cancel tidak menimpa data lama; proses anak benar-benar berhenti.
+
+### Backlog (belum dijadwalkan)
+- [ ] Antrean URL persisten + retry terjadwal untuk `failed.json`.
+- [ ] Deteksi perubahan struktur DOM/JSON Threads dan peringatan selector di halaman Pengumpulan Data.
+- [ ] Ekspor/impor dataset dengan versi schema + migrasi otomatis saat schema berubah.
+- [ ] Penjadwalan scraping berkala (cron lokal) dengan batas laju dan jeda acak.
+- [ ] Audit aksesibilitas lanjutan: fokus keyboard, `aria-live` untuk progres, dan kontras mode gelap.
+- [ ] Uji beban data besar (≥10 ribu komentar) untuk viewer, analitik, dan panel bertab.
+
 ## Catatan
 - `parent_code` diisi best-effort dari struktur DOM/quote-reply; balasan yang tidak pernah dirender (mis. tersembunyi di balik “Lihat balasan” yang gagal diklik) tetap tidak terbaca.
 - Data lama yang belum punya `timestamp` tidak ikut tersaring saat filter tanggal aktif.
