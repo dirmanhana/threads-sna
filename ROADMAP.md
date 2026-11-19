@@ -33,6 +33,11 @@ Checklist dari saran yang disetujui. Selesai semua pada sesi ini.
 - [x] Ekspor PNG/SVG full-graph: hitung bbox semua node + label, lepas transform zoom, tidak terpotong pada kondisi default/reset zoom.
 - [x] Mode layar penuh: hanya peta jaringan; tombol **Layar penuh**, keluar via tombol mengambang atau `Esc`.
 
+## Fitur utilitas & pelaporan
+- [x] Time-lapse / network replay: tombol **▶ Putar / ⏸ Jeda**, slider scrub, kecepatan 1×/5×/20×, panel peristiwa terbaru, dan **Kembali ke akhir**. Event dibangun dari post + thread + replies (903 peristiwa pada data nyata); timestamp kosong diberi waktu sintetis dari tanggal terdekat. Metrik dihitung sekali dari graf penuh supaya warna komunitas stabil saat replay.
+- [x] Snapshot & report export: **PNG/SVG laporan** — satu gambar berisi graf penuh + ringkasan statistik (postingan, komentar, thread, akun, relasi, komunitas, 5 aktor teratas) + legenda edge/node. PNG laporan ~6000 px (teruji 6000×5509).
+- [x] Fix scrub: baca nilai slider sebelum `stopReplay()` menimpa `slider.value` dengan posisi lama (scrub 60 kini benar-benar loncat ke 60/903).
+
 ## Perbaikan lanjutan
 - [x] Bug: akun yang hanya disebut (@mention) tidak punya node → `d3.forceLink` melempar `node not found`, yang salah dilaporkan sebagai "Gagal memuat data.json" / "JSON tidak valid"
 - [x] Pisahkan error parse JSON vs error render di banner viewer; beri petunjuk `./run.sh serve` kalau `fetch` diblokir
@@ -43,6 +48,8 @@ Checklist dari saran yang disetujui. Selesai semua pada sesi ini.
 - Uji browser headless: data.json termuat via HTTP **dan** via input file; `file://` menampilkan petunjuk serve; JSON rusak tetap terdeteksi; toggle co-comment tanpa page error
 - `SNA.build(data.posts)` → 665 akun · 753 relasi · 20 komunitas (default)
 - Filter tanggal & toggle co-comment sudah diuji terhadap data nyata
+- Uji browser headless time-lapse: play/jeda stabil, scrub 60 → 60/903, kembali ke akhir → 903/903 tanpa page error
+- Uji browser headless laporan: SVG mengandung judul/legenda/statistik/aktor teratas; PNG laporan 6000 px tanpa page error
 
 ## Catatan
 - `parent_code` diisi best-effort dari quote-reply; balasan bersarang belum sepenuhnya dibedakan.

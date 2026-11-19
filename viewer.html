@@ -39,6 +39,7 @@ body.fs #svg{width:100%;height:100%;display:block}
 body.fs #tip{z-index:999}
 #fsExit{display:none;position:fixed;top:12px;right:12px;z-index:100;background:var(--card);color:var(--fg);border:1px solid var(--bd);border-radius:8px;padding:6px 10px;cursor:pointer;font:inherit}
 body.fs #fsExit{display:block}
+#replayInfo{font-variant-numeric:tabular-nums;color:var(--fg);min-width:150px}
 details.exp{position:relative}
 details.exp .menu{position:absolute;right:0;top:100%;z-index:20;background:var(--card);border:1px solid var(--bd);border-radius:8px;padding:8px;display:flex;flex-direction:column;gap:6px;min-width:132px;box-shadow:0 4px 16px #0003}
 </style></head><body>
@@ -53,6 +54,7 @@ details.exp .menu{position:absolute;right:0;top:100%;z-index:20;background:var(-
 <details class="exp"><summary>Ekspor</summary><div class="menu">
   <button id="exNode">CSV node</button><button id="exEdge">CSV edge</button>
   <button id="exGml">GraphML</button><button id="exPng">PNG</button><button id="exSvg">SVG</button>
+  <button id="exRepPng">PNG laporan</button><button id="exRepSvg">SVG laporan</button>
 </div></details>
 <span class="st" id="st"></span></header>
 <div id="warn" hidden></div>
@@ -64,6 +66,10 @@ details.exp .menu{position:absolute;right:0;top:100%;z-index:20;background:var(-
 <label>dari <input id="dateFrom" type="date"></label>
 <label>sampai <input id="dateTo" type="date"></label>
 <label>akun <select id="actor"><option value="">— Pilih akun —</option></select></label>
+<label>time-lapse <button id="play">▶ Putar</button>
+<input id="scrub" type="range" min="0" max="0" value="0" style="width:150px">
+<select id="speed" title="Kecepatan putar"><option value="1">1×</option><option value="5" selected>5×</option><option value="20">20×</option></select></label>
+<span id="replayInfo">0 / 0 peristiwa</span>
 </div>
 <main><svg id="svg"></svg><aside id="pn"></aside></main>
 <div id="tip" hidden></div>
@@ -116,6 +122,7 @@ const userLink=id=>linkUser(id,'@'+id,authorUrl(id));
 
 const state={types:new Set(['komentar','mention']),minDeg:1,dateFrom:'',dateTo:''};
 let all=[],posts=[],sim,kw='',graph=null,metrics=null,focus=null,isolate=false,panelUser=null,zoom=null,colorBy='peran',tm;
+const replay={events:[],i:0,playing:false,timer:null};
 
 function showWarn(msg){const w=$('#warn');w.textContent=msg;w.hidden=false}
 function hideWarn(){$('#warn').hidden=true}
@@ -132,9 +139,23 @@ function buildActorList(){
   sel.innerHTML='<option value="">— Pilih akun —</option>'+ids.map(id=>'<option value="'+esc(id)+'">@'+esc(id)+' ('+deg.get(id)+')</option>').join('');
 }
 function setActor(id){const s=$('#actor');if(s)s.value=id||''}
+function renderGraph(g,withMetrics=true){
+  const prev=new Map((graph&&graph.nodes||[]).map(n=>[n.id,n]));
+  g.nodes.forEach(n=>{const p=prev.get(n.id);if(p&&Number.isFinite(p.x)){
+    n.x=p.x;n.y=p.y;n.vx=p.vx;n.vy=p.vy;n.fx=p.fx;n.fy=p.fy}});
+  graph=g;
+  if(withMetrics)metrics=SNA.analyze(g);
+  draw(g);
+}
 
-function load(d){all=Array.isArray(d)?d:(d&&Array.isArray(d.posts)?d.posts:[]);buildActorList();apply()}
+function load(d){
+  stopReplay(true);replay.events=[];replay.i=0;
+  all=Array.isArray(d)?d:(d&&Array.isArray(d.posts)?d.posts:[]);
+  buildActorList();apply();
+  replay.events=buildEvents();updateReplayUI();
+}
 function apply(){
+  if(replay.playing)stopReplay(true);   // filter apa pun menghentikan replay
   const k=kw.trim().toLowerCase(),has=t=>String(t==null?'':t).toLowerCase().includes(k);
   posts=!k?all:all.map(p=>{
     if(has(p.text)||has(p.author))return p;
@@ -144,11 +165,8 @@ function apply(){
     if(th.length)return {...p,thread:th};
     return null;
   }).filter(Boolean);
-  const prev=new Map((graph&&graph.nodes||[]).map(n=>[n.id,n]));
-  const g=SNA.build(posts,state);
-  g.nodes.forEach(n=>{const p=prev.get(n.id);if(p){n.x=p.x;n.y=p.y;n.vx=p.vx;n.vy=p.vy}});
-  graph=g;metrics=SNA.analyze(g);
-  redraw();panel();header();
+  renderGraph(SNA.build(posts,state),true);
+  panel();header();
 }
 function header(){
   const np=posts.length,
@@ -157,6 +175,89 @@ function header(){
         na=graph?graph.nodes.length:0,
         nl=graph?graph.links.length:0;
   $('#st').textContent=np+' post · '+nc+' komentar · '+nt+' thread · '+na+' akun · '+nl+' relasi'+(kw.trim()?' · dari '+all.length+' post':'');
+}
+
+/* ---------- time-lapse / network replay ---------- */
+function buildEvents(){
+  const ev=[];
+  const dates=[];
+  all.forEach(p=>{
+    const t=SNA.parseDate(p.timestamp);if(t!=null)dates.push(t);
+    [...(p.thread||[]),...(p.replies||[])].forEach(it=>{
+      const d=SNA.parseDate(it.timestamp);if(d!=null)dates.push(d)});
+  });
+  const globalBase=dates.length?Math.min(...dates):Date.UTC(2026,0,1);
+  all.forEach((p,pi)=>{
+    const pid=p.code||('post-'+pi);
+    const pt=SNA.parseDate(p.timestamp);
+    const items=[...(p.thread||[]).map(x=>({...x,_kind:'thread'})),
+                 ...(p.replies||[]).map(x=>({...x,_kind:'komentar'}))];
+    const known=items.map(x=>SNA.parseDate(x.timestamp)).filter(x=>x!=null);
+    const base=pt||(known.length?Math.min(...known):globalBase+pi*86400000);
+    ev.push({t:pt||base,order:pi*100000,pid,post:p,author:p.author,kind:'post',date:pt});
+    items.forEach((it,ii)=>{
+      const date=SNA.parseDate(it.timestamp);
+      ev.push({t:date||base+(ii+1)*60000,order:pi*100000+ii+1,pid,post:p,
+               author:it.author,kind:it._kind,date,item:it});
+    });
+  });
+  ev.sort((a,b)=>a.t-b.t||a.order-b.order);
+  return ev;
+}
+function postsUntil(n){
+  const m=new Map();
+  for(let i=0;i<n;i++){
+    const e=replay.events[i];
+    let q=m.get(e.pid);
+    if(!q){q={...e.post,thread:[],replies:[]};m.set(e.pid,q)}
+    if(e.kind==='thread')q.thread.push(e.item);
+    else if(e.kind==='komentar')q.replies.push(e.item);
+  }
+  return [...m.values()];
+}
+const replayDate=t=>t?new Date(t).toLocaleDateString('id-ID',{day:'2-digit',month:'short',year:'numeric'}):'-';
+function updateReplayUI(){
+  const n=replay.i,total=replay.events.length,s=$('#scrub');
+  if(s){s.max=String(total);s.value=String(n)}
+  const info=$('#replayInfo');
+  if(info)info.textContent=n+' / '+total+' peristiwa'+(total?' · '+(n?replayDate(replay.events[n-1].t):'mulai'):'');
+  const b=$('#play');
+  if(b)b.textContent=replay.playing?'⏸ Jeda':(n&&n<total?'▶ Lanjut':'▶ Putar');
+}
+function replayPanel(){
+  const el=$('#pn');if(!el)return;
+  const ev=replay.events[replay.i-1];
+  const recent=replay.events.slice(Math.max(0,replay.i-5),replay.i).reverse();
+  el.innerHTML='<h4>Time-lapse jaringan</h4><div class="tag">'+replay.i+' dari '+replay.events.length+
+    ' peristiwa · '+(ev?'terakhir: '+replayDate(ev.t)+' · @'+esc(ev.author)+' ('+esc(ev.kind)+')':'belum dimulai')+
+    '</div><div class="acts"><button id="pBack">Kembali ke akhir</button></div>'+
+    actorTop()+'<h4>Peristiwa terbaru</h4>'+recent.map(e=>
+      '<div class="tag">'+replayDate(e.t)+' · @'+esc(e.author)+' · '+esc(e.kind)+'</div>').join('');
+  const b=$('#pBack');if(b)b.onclick=()=>stopReplay();
+}
+function applyReplay(){
+  posts=postsUntil(replay.i);
+  renderGraph(SNA.build(posts,state),false);   // metrik dihitung sekali dari graf penuh
+  header();replayPanel();updateReplayUI();
+}
+function startReplay(){
+  if(!replay.events.length)replay.events=buildEvents();
+  if(!replay.events.length)return;
+  if(replay.i>=replay.events.length)replay.i=0;
+  metrics=SNA.analyze(SNA.build(all,state));   // warna komunitas stabil selama replay
+  replay.playing=true;clearInterval(replay.timer);
+  const tick=()=>{
+    const step=Math.max(1,Number($('#speed').value)||1);
+    replay.i=Math.min(replay.events.length,replay.i+step);
+    applyReplay();
+    if(replay.i>=replay.events.length)stopReplay();
+  };
+  replay.timer=setInterval(tick,120);tick();updateReplayUI();
+}
+function stopReplay(skipApply=false){
+  replay.playing=false;clearInterval(replay.timer);replay.timer=null;
+  if(!skipApply){replay.i=replay.events.length;posts=all;apply();updateReplayUI()}
+  else updateReplayUI();
 }
 
 function visibleGraph(){
@@ -402,6 +503,19 @@ function graphML(){
   out.push('</graph></graphml>');
   return out.join('\n');
 }
+const SVGNS='http://www.w3.org/2000/svg';
+const cssGet=()=>{const cs=getComputedStyle(document.documentElement);
+  return v=>cs.getPropertyValue(v).trim()||({'--c1':'#378add','--c2':'#d85a30','--c3':'#1d9e75',
+    '--c4':'#8f6fd0','--fg':'#1a1a1a','--mut':'#6b6b6b','--bg':'#fff'}[v]||'#888')};
+function inlineColors(el,get){
+  el.querySelectorAll('*').forEach(n=>{
+    ['fill','stroke'].forEach(a=>{
+      const v=n.getAttribute(a);if(!v)return;
+      if(v==='context-stroke')n.setAttribute(a,get('--c1'));
+      else if(v.indexOf('var(--')===0)n.setAttribute(a,get(v.slice(4,-1).trim()));
+    });
+  });
+}
 function svgForExport(){
   const src=$('#svg'),clone=src.cloneNode(true);
   const vw=src.clientWidth||960,vh=src.clientHeight||600;
@@ -425,20 +539,12 @@ function svgForExport(){
   clone.setAttribute('xmlns','http://www.w3.org/2000/svg');
   clone.setAttribute('viewBox',[X,Y,W,H].join(' '));
   clone.setAttribute('width',W);clone.setAttribute('height',H);
-  const cs=getComputedStyle(document.documentElement);
-  const get=v=>{const x=cs.getPropertyValue(v).trim();
-    return x||({'--c1':'#378add','--c2':'#d85a30','--c3':'#1d9e75','--c4':'#8f6fd0','--fg':'#1a1a1a','--mut':'#6b6b6b'}[v]||'#888')};
-  clone.querySelectorAll('*').forEach(el=>{
-    ['fill','stroke'].forEach(a=>{
-      const v=el.getAttribute(a);if(!v)return;
-      if(v==='context-stroke')el.setAttribute(a,get('--c1'));
-      else if(v.indexOf('var(--')===0)el.setAttribute(a,get(v.slice(4,-1).trim()));
-    });
-  });
-  const st=document.createElementNS('http://www.w3.org/2000/svg','style');
+  const get=cssGet();
+  inlineColors(clone,get);
+  const st=document.createElementNS(SVGNS,'style');
   st.textContent='text{fill:'+get('--fg')+';font-size:11px;font-family:system-ui,sans-serif}';
   clone.insertBefore(st,clone.firstChild);
-  return {clone,W,H};
+  return {clone,W,H,get};
 }
 function exportSVG(){
   try{
@@ -446,24 +552,89 @@ function exportSVG(){
     download(new Blob([new XMLSerializer().serializeToString(c)],{type:'image/svg+xml;charset=utf-8'}),'sna.svg');
   }catch(err){showWarn('Gagal mengekspor SVG: '+(err&&err.message||err))}
 }
-function exportPNG(){
+function svgToPng(svg,W,H,name,maxDim=4000){
   try{
-    const {clone,W,H}=svgForExport();
-    const url=URL.createObjectURL(new Blob([new XMLSerializer().serializeToString(clone)],{type:'image/svg+xml;charset=utf-8'}));
+    const str=new XMLSerializer().serializeToString(svg);
+    const url=URL.createObjectURL(new Blob([str],{type:'image/svg+xml;charset=utf-8'}));
     const img=new Image();
     img.onload=()=>{
       try{
         const cv=document.createElement('canvas');
-        const scale=Math.max(.25,Math.min(2,4000/Math.max(W,H)));
+        const scale=Math.max(.25,Math.min(2.5,maxDim/Math.max(W,H)));
         cv.width=Math.max(1,Math.round(W*scale));cv.height=Math.max(1,Math.round(H*scale));
         const ctx=cv.getContext('2d');ctx.scale(scale,scale);ctx.drawImage(img,0,0,W,H);
-        cv.toBlob(b=>{if(b)download(b,'sna.png');else showWarn('Gagal membuat PNG.')},'image/png');
+        cv.toBlob(b=>{if(b)download(b,name);else showWarn('Gagal membuat PNG.')},'image/png');
       }catch(err){showWarn('Gagal mengekspor PNG: '+(err&&err.message||err))}
       finally{URL.revokeObjectURL(url)}
     };
     img.onerror=()=>{URL.revokeObjectURL(url);showWarn('Gagal memuat SVG untuk PNG.')};
     img.src=url;
   }catch(err){showWarn('Gagal mengekspor PNG: '+(err&&err.message||err))}
+}
+function exportPNG(){
+  try{const {clone,W,H}=svgForExport();svgToPng(clone,W,H,'sna.png')}
+  catch(err){showWarn('Gagal mengekspor PNG: '+(err&&err.message||err))}
+}
+/* Snapshot laporan: graf + legenda + ringkasan statistik dalam satu SVG/PNG. */
+function reportSvg(){
+  const base=svgForExport(),get=base.get,fg=get('--fg'),mut=get('--mut'),bg=get('--bg');
+  const g=visibleGraph()||{nodes:[],links:[]};
+  const gw=base.W,gh=base.H,side=340,pad=28,gap=24;
+  const W=Math.ceil(gw+side+pad*3+gap),H=Math.ceil(Math.max(gh,470)+pad*2);
+  const svg=document.createElementNS(SVGNS,'svg');
+  svg.setAttribute('xmlns',SVGNS);
+  svg.setAttribute('width',W);svg.setAttribute('height',H);
+  svg.setAttribute('viewBox','0 0 '+W+' '+H);
+  const rect=document.createElementNS(SVGNS,'rect');
+  rect.setAttribute('width',W);rect.setAttribute('height',H);rect.setAttribute('fill',bg);
+  svg.appendChild(rect);
+  base.clone.setAttribute('x',pad);base.clone.setAttribute('y',pad);
+  svg.appendChild(base.clone);
+  const addText=(x,y,text,size=12,weight='normal',fill=fg)=>{
+    const t=document.createElementNS(SVGNS,'text');
+    t.setAttribute('x',x);t.setAttribute('y',y);
+    t.setAttribute('font-family','system-ui, sans-serif');
+    t.setAttribute('font-size',size);t.setAttribute('font-weight',weight);
+    t.setAttribute('fill',fill);t.textContent=text;svg.appendChild(t);
+  };
+  const px=pad+gw+gap+16;
+  let y=pad+22;
+  addText(px,y,'Threads SNA — Snapshot',16,'700');y+=22;
+  addText(px,y,'Dibuat: '+new Date().toLocaleString('id-ID'),11,'normal',mut);y+=28;
+  const np=posts.length,
+        nc=posts.reduce((a,p)=>a+((p.replies||[]).length),0),
+        nt=posts.reduce((a,p)=>a+((p.thread||[]).length),0);
+  const sizes=SNA.communitySizes(metrics&&metrics.communities);
+  [np+' postingan',nc+' komentar',nt+' thread',g.nodes.length+' akun',
+   g.links.length+' relasi',sizes.size+' komunitas'].forEach(s=>{addText(px,y,'• '+s,12);y+=19});
+  y+=12;
+  addText(px,y,'Aktor teratas (degree)',12,'700');y+=19;
+  const ids=new Set(g.nodes.map(n=>n.id));
+  const top=(metrics&&metrics.degree?[...metrics.degree.entries()]:[])
+    .filter(([id])=>ids.has(id)).sort((a,b)=>b[1]-a[1]||cmp(String(a[0]),String(b[0]))).slice(0,5);
+  top.forEach(([id,d])=>{addText(px,y,'@'+id+' — '+d,11);y+=17});
+  y+=12;
+  addText(px,y,'Legenda',12,'700');y+=19;
+  [['komentar',get('--c1')],['mention',get('--c2')],['co-comment',get('--c4')]].forEach(([label,c])=>{
+    const l=document.createElementNS(SVGNS,'line');
+    l.setAttribute('x1',px);l.setAttribute('x2',px+26);
+    l.setAttribute('y1',y-4);l.setAttribute('y2',y-4);
+    l.setAttribute('stroke',c);l.setAttribute('stroke-width',3);svg.appendChild(l);
+    addText(px+34,y,label,11);y+=18;
+  });
+  y+=10;
+  addText(px,y,colorBy==='komunitas'?'Warna node: komunitas'
+    :'Hijau: penulis post · abu: komentator',10,'normal',mut);y+=16;
+  addText(px,y,'Sumber: data.json · Threads SNA',10,'normal',mut);
+  return {svg,W,H};
+}
+function exportReport(fmt){
+  try{
+    const {svg,W,H}=reportSvg();
+    if(fmt==='svg')download(new Blob([new XMLSerializer().serializeToString(svg)],
+      {type:'image/svg+xml;charset=utf-8'}),'sna-laporan.svg');
+    else svgToPng(svg,W,H,'sna-laporan.png',6000);
+  }catch(err){showWarn('Gagal mengekspor laporan: '+(err&&err.message||err))}
 }
 
 function bindControls(){
@@ -476,6 +647,21 @@ function bindControls(){
   $('#colorBy').onchange=e=>{colorBy=e.target.value;redrawKeep();panel()};
   $('#fs').onclick=()=>setFullscreen(!document.body.classList.contains('fs'));
   $('#fsExit').onclick=()=>setFullscreen(false);
+  $('#play').onclick=()=>{
+    if(replay.playing)stopReplay(true);   // jeda: pertahankan posisi
+    else if(!replay.events.length)startReplay();
+    else if(replay.i>=replay.events.length){replay.i=0;startReplay()}
+    else startReplay();
+  };
+  $('#scrub').oninput=e=>{
+    if(!replay.events.length)replay.events=buildEvents();
+    // Baca nilai slider dulu: stopReplay() -> updateReplayUI() akan menimpa
+    // slider.value dengan replay.i lama jika dibaca setelahnya.
+    const target=Math.max(0,Math.min(replay.events.length,Number(e.target.value)||0));
+    stopReplay(true);replay.i=target;
+    applyReplay();
+  };
+  $('#speed').onchange=updateReplayUI;
   $('#actor').onchange=e=>{
     const id=e.target.value;
     if(!id){focus=null;isolate=false;redraw();panel();return}
@@ -501,9 +687,11 @@ function bindControls(){
   $('#exGml').onclick=()=>{try{download(new Blob([graphML()],{type:'application/graphml+xml;charset=utf-8'}),'sna.graphml')}
                            catch(err){showWarn('Gagal mengekspor GraphML: '+(err&&err.message||err))}};
   $('#exSvg').onclick=exportSVG;$('#exPng').onclick=exportPNG;
+  $('#exRepSvg').onclick=()=>exportReport('svg');
+  $('#exRepPng').onclick=()=>exportReport('png');
 }
 
-bindControls();hideWarn();
+bindControls();hideWarn();updateReplayUI();
 try{load(SAMPLE)}catch(x){showWarn('Gagal menampilkan data contoh: '+(x&&x.message||x))}
 fetch('data.json')
   .then(r=>{if(!r.ok)throw new Error('HTTP '+r.status);return r.json()})

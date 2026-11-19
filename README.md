@@ -57,7 +57,9 @@ Data lama (sebelum schema ini) bisa dimigrasi dengan `./run.sh migrate`. Backup 
 - Kolom pencarian: saring postingan/komentar/akun, graf ikut berubah, kata kunci disorot.
 - Filter: toggle jenis edge, slider derajat minimum, rentang tanggal, warna node per komunitas, dropdown loncat ke akun.
 - Panel: peringkat **degree / betweenness / closeness / eigenvector**, ringkasan komunitas Louvain, dan semua postingan.
+- **Time-lapse / network replay**: tombol **▶ Putar** memutar pertumbuhan jaringan dari postingan pertama sampai komentar terakhir. Slider **scrub** bisa loncat ke peristiwa tertentu, kecepatan `1× / 5× / 20×` bisa diatur, dan **Jeda** mempertahankan posisi. Waktu diambil dari `timestamp`; yang kosong diisi otomatis berdasarkan tanggal terdekat. Metrik/warna komunitas dihitung sekali dari graf penuh supaya stabil, dan panel menampilkan peristiwa terbaru. Tombol **Kembali ke akhir** mengembalikan graf lengkap.
 - Ekspor: CSV node, CSV edge, GraphML (Gephi), PNG, SVG. PNG/SVG mengikuti **seluruh graf** (bbox node + label), tidak terpotong oleh viewport dan tidak dipengaruhi zoom; **Reset zoom** mengembalikan viewport.
+- **Snapshot & report export**: **PNG laporan** / **SVG laporan** menghasilkan satu gambar resolusi tinggi berisi graf + panel ringkasan (jumlah postingan/komentar/thread/akun/relasi/komunitas, 5 aktor teratas berdasarkan degree, dan legenda warna edge/node) untuk kebutuhan laporan. PNG laporan dirender sampai ~6000 px pada sisi terpanjang.
 - Viewer memuat `data.json` otomatis; tanpa file itu, data contoh tampil dengan banner peringatan. Bisa juga tombol **Muat data.json**.
 - Logika graf murni (build, metrik, Louvain) ada di `viewer_core.js`; bisa dipakai dari Node lewat `require('./viewer_core.js')`.
 
