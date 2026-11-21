@@ -81,6 +81,19 @@ fi
 echo "==> [6/7] Menyiapkan .env untuk analisis LLM"
 if [ -f .env ]; then
   echo "    .env sudah ada; tidak ditimpa."
+  # Tambahkan kunci discovery baru bila belum ada (aman, tidak menimpa nilai lama).
+  for kv in \
+    "SCRAPE_DISCOVERY_WAIT_MS=5000" \
+    "SCRAPE_DISCOVERY_STALL=4" \
+    "SCRAPE_DISCOVERY_ROUNDS_EXTRA=20" \
+    "SCRAPE_SCROLL_WAIT_MIN_MS=1200" \
+    "SCRAPE_SCROLL_WAIT_MAX_MS=2200"; do
+    key="${kv%%=*}"
+    if ! grep -q "^${key}=" .env; then
+      echo "$kv" >> .env
+      echo "    Menambahkan $key ke .env"
+    fi
+  done
 else
   cp .env.example .env
   echo "    .env dibuat dari .env.example — isi LLM_API_KEY dengan kredensial Anda."

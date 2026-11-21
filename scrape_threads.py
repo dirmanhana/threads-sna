@@ -29,11 +29,63 @@ from urllib.parse import quote
 from playwright.sync_api import sync_playwright
 
 BASE = "https://www.threads.com"
+ROOT = os.path.dirname(os.path.abspath(__file__))
+
+
+def load_env(path=None):
+    """Parser .env sederhana (tanpa dependency tambahan)."""
+    path = path or os.path.join(ROOT, ".env")
+    out = {}
+    if not os.path.exists(path):
+        return out
+    try:
+        with open(path, encoding="utf-8") as f:
+            lines = f.read().splitlines()
+    except OSError:
+        return out
+    for raw in lines:
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        out[key.strip()] = value.strip().strip('"').strip("'").strip()
+    return out
+
+
+def env_int(name, default):
+    try:
+        return int(str(load_env().get(name, default)).strip())
+    except (TypeError, ValueError):
+        return int(default)
+
+
+def apply_discovery_env():
+    global DISCOVERY_WAIT_MS, DISCOVERY_ROUNDS_EXTRA, DISCOVERY_STALL
+    global SCROLL_WAIT_MIN_MS, SCROLL_WAIT_MAX_MS
+    env = load_env()
+    def pick(name, cur):
+        v = env.get(name)
+        if v is None or str(v).strip() == "":
+            return cur
+        try:
+            return int(str(v).strip())
+        except ValueError:
+            return cur
+    DISCOVERY_WAIT_MS = pick("SCRAPE_DISCOVERY_WAIT_MS", DISCOVERY_WAIT_MS)
+    DISCOVERY_ROUNDS_EXTRA = pick("SCRAPE_DISCOVERY_ROUNDS_EXTRA", DISCOVERY_ROUNDS_EXTRA)
+    DISCOVERY_STALL = pick("SCRAPE_DISCOVERY_STALL", DISCOVERY_STALL)
+    SCROLL_WAIT_MIN_MS = pick("SCRAPE_SCROLL_WAIT_MIN_MS", SCROLL_WAIT_MIN_MS)
+    SCROLL_WAIT_MAX_MS = pick("SCRAPE_SCROLL_WAIT_MAX_MS", SCROLL_WAIT_MAX_MS)
 PROFILE_DIR = "./threads_profile"   # sesi login disimpan di sini
 OUT = "data.json"
 FAILED = "failed.json"
 PROGRESS = "scrape_progress.json"
 LOGIN_MARKER = "login_selesai.marker"
+DISCOVERY_WAIT_MS = 3500
+DISCOVERY_ROUNDS_EXTRA = 0
+DISCOVERY_STALL = 1
+SCROLL_WAIT_MIN_MS = 1000
+SCROLL_WAIT_MAX_MS = 1800
 LINK_RE = re.compile(r"/@([^/]+)/post/([\w-]+)")
 SESSION_COOKIES = ("sessionid", "ds_user_id")   # cookie=.threads.com hasil login
 
@@ -448,19 +500,26 @@ def scroll_collect(page, rounds, store, stall=3, cap=None, meta=None, expand=Non
             reason = "stall"
             break
         page.mouse.wheel(0, 2500)
-        page.wait_for_timeout(random.randint(1000, 1800))
+        wmin = max(200, int(SCROLL_WAIT_MIN_MS))
+        wmax = max(wmin, int(SCROLL_WAIT_MAX_MS))
+        page.wait_for_timeout(random.randint(wmin, wmax))
     if meta is not None:
         meta["stop_reason"] = reason
         meta["rounds"] = used
     return store
 
 
+def discovery_rounds(max_posts):
+    extra = max(0, int(DISCOVERY_ROUNDS_EXTRA or 0))
+    return max(8, int(max_posts) * 2, int(max_posts) + extra)
+
+
 def get_profile_posts(page, handle, max_posts):
     page.goto(f"{BASE}/@{handle}", wait_until="domcontentloaded")
-    page.wait_for_timeout(3000)
+    page.wait_for_timeout(max(1000, int(DISCOVERY_WAIT_MS)))
     store = {}
-    for _ in range(max(3, max_posts)):
-        scroll_collect(page, 1, store, stall=1)
+    for _ in range(discovery_rounds(max_posts)):
+        scroll_collect(page, 1, store, stall=max(1, int(DISCOVERY_STALL)))
         mine = [c for c, v in store.items() if v["author"].lower() == handle.lower()]
         if len(mine) >= max_posts:
             break
@@ -469,10 +528,10 @@ def get_profile_posts(page, handle, max_posts):
 
 def get_keyword_posts(page, query, max_posts):
     page.goto(f"{BASE}/search?q={quote(query)}&serp_type=default", wait_until="domcontentloaded")
-    page.wait_for_timeout(3500)
+    page.wait_for_timeout(max(1000, int(DISCOVERY_WAIT_MS)))
     store = {}
-    for _ in range(max(3, max_posts)):
-        scroll_collect(page, 1, store, stall=1)
+    for _ in range(discovery_rounds(max_posts)):
+        scroll_collect(page, 1, store, stall=max(1, int(DISCOVERY_STALL)))
         if len(store) >= max_posts:
             break
     return [f"{BASE}/@{v['author']}/post/{c}" for c, v in store.items()][:max_posts]
@@ -729,7 +788,25 @@ def main():
     ap.add_argument("--replace", action="store_true", help="timpa data lama (default: digabung)")
     ap.add_argument("--login-timeout", type=int, default=300, help="batas tunggu login web (detik)")
     ap.add_argument("--login-marker", default="", help="berkas penanda konfirmasi login dari web")
+    ap.add_argument("--discovery-wait-ms", type=int, default=None, help="tunggu awal discovery (ms)")
+    ap.add_argument("--discovery-stall", type=int, default=None, help="scroll discovery tanpa item baru sebelum berhenti")
+    ap.add_argument("--discovery-rounds-extra", type=int, default=None, help="tambahan putaran discovery di atas max-posts")
+    ap.add_argument("--scroll-wait-min-ms", type=int, default=None, help="jeda minimum antar scroll (ms)")
+    ap.add_argument("--scroll-wait-max-ms", type=int, default=None, help="jeda maksimum antar scroll (ms)")
     a = ap.parse_args()
+    apply_discovery_env()
+    if a.discovery_wait_ms is not None:
+        globals()["DISCOVERY_WAIT_MS"] = max(1000, a.discovery_wait_ms)
+    if a.discovery_stall is not None:
+        globals()["DISCOVERY_STALL"] = max(1, a.discovery_stall)
+    if a.discovery_rounds_extra is not None:
+        globals()["DISCOVERY_ROUNDS_EXTRA"] = max(0, a.discovery_rounds_extra)
+    if a.scroll_wait_min_ms is not None:
+        globals()["SCROLL_WAIT_MIN_MS"] = max(200, a.scroll_wait_min_ms)
+    if a.scroll_wait_max_ms is not None:
+        globals()["SCROLL_WAIT_MAX_MS"] = max(200, a.scroll_wait_max_ms)
+    if SCROLL_WAIT_MAX_MS < SCROLL_WAIT_MIN_MS:
+        globals()["SCROLL_WAIT_MAX_MS"] = SCROLL_WAIT_MIN_MS
     say = log if a.web else print
 
     if a.project:

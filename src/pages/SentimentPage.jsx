@@ -1,11 +1,57 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Sparkles, Download } from 'lucide-react';
+import { Sparkles, Download, ExternalLink } from 'lucide-react';
 import { api, getJson } from '../lib/utils.js';
 import { currentProject as getProject, projectFile } from '../lib/project.js';
+import { itemUrl } from '../lib/viewerLib.js';
 import '../../viewer_core.js';
 
 const SNA = globalThis.SNA;
 const nf = (v) => Number(v || 0).toLocaleString('id-ID');
+const WORD_STOP = new Set([
+  // Partikel & filler
+  'aja','saja','sj','sih','kan','lah','kah','pun','deh','dong','dunk','mah','nih','ni','tuh','tu','kok','koq','lho','loh','ya','yah','iya','iyap','yap','yep','yoi','oke','ok','sip','siap','nah','wah','eh','oh','hmm','nya',
+  // Hubung, preposisi & penunjuk
+  'yang','yg','yng','dan','dn','atau','ato','ataw','tapi','tp','tetapi','namun','sedangkan','padahal','pdhl','karena','krn','karna','sebab','sbb','kalau','kalo','klo','klw','kl','jika','jikalau','bila','apabila','misal','misalnya','umpama','biar','agar','supaya','spy','untuk','utk','buat','bt','bagi','dari','dr','dri','ke','di','pada','pd','dalam','dlm','dengan','dgn','dg','sama','sm','ama','oleh','tentang','ttg','soal','soalnya','terhadap','thd','hingga','sampai','sampe','ampe','sejak','selama','sebelum','sblm','sesudah','setelah','stlh','ketika','saat','waktu','wkt','pas','ini','itu','gini','gitu','begini','begitu','anu','dsb','dll','dst',
+  // Kata ganti & sapaan
+  'aku','ak','aq','saya','sy','gue','gw','gua','ane','kamu','km','kmu','kau','engkau','elu','lu','lo','loe','ente','anda','dia','dy','ia','beliau','kita','kt','kami','kalian','klian','mereka','mrk','kak','kk','kakak','mas','mbak','mba','bang','bg','abang','pak','bapak','bpk','bu','ibu','om','tante','dek','adek','adik','min','mimin','admin','bro','bre','bray','sis','sist','gan','juragan','guys','gaes','ges','bestie','besti','cuy','coy','sob','sobat','bos','boss','ndoro','netizen','warganet','orang','org','orng',
+  // Negasi & tanya
+  'tidak','tdk','tak','gak','ga','gk','enggak','engga','nggak','ngga','kagak','kaga','ndak','nda','bukan','bkn','jangan','jgn','belum','blm','lum','tanpa','apa','ap','apaan','apakah','siapa','sapa','sp','mana','mn','dimana','kemana','darimana','kapan','kpn','kenapa','knp','knapa','mengapa','mgp','bagaimana','bgmn','gimana','gmn','berapa','brp',
+  // Keterangan umum & kuantitas
+  'sudah','sdh','udah','udh','dah','telah','tlh','masih','msh','msi','sedang','sdg','lagi','lg','akan','akn','bakal','bakalan','mau','mo','ingin','pgn','pengen','bisa','bs','dapat','dpt','boleh','blh','harus','hrs','mesti','wajib','perlu','butuh','punya','py','ada','ad','jadi','jd','jdi','menjadi','bikin','kasih','ksh','beri','ambil','lihat','liat','dengar','denger','tahu','tau','tw','paham','ngerti','bilang','blg','kata','katanya','ktnya','omong','ngomong','pikir','rasa','kayak','kyk','kayaknya','kyknya','seperti','sprt','spt','mirip','memang','mmg','emang','emg','pasti','pst','tentu','mungkin','mgkn','kayanya','banget','bgt','sangat','sgt','amat','terlalu','trlalu','cukup','agak','kurang','krg','lebih','lbh','paling','plg','sekali','skl','benar','bener','bnr','betul','btl','salah','slh','beda','lain','semua','smua','seluruh','segala','banyak','byk','bnyk','sedikit','sdkt','dikit','beberapa','bbrp','tiap','setiap','masing','sendiri','sndr','sndiri','bareng','brg','bersama','dulu','dl','sekarang','skrg','skg','nanti','ntar','tar','besok','bsk','kemarin','kmrn','tadi','td','baru','br','lama','lm','sering','srg','jarang','jrg','pernah','prnh','selalu','sll','slalu','terus','trs','trus','langsung','lgsg','lsg','cepat','cepet','cpt','pelan','makin','semakin','tambah','tmbh','mulai','selesai','habis','abis','tinggal','tgl','cuma','cuman','cm','cmn','hanya','hny','juga','jg','pula','malah','malahan','justru','bahkan','bhkn','apalagi','aplgi','lagian','lagipula',
+  // Noise UI & platform
+  'tampilkan','sembunyikan','balasan','balas','reply','replies','komentar','komen','comment','comments','konten','content','ai','threads','instagram','ig','facebook','fb','tiktok','twitter','youtube','yt','post','posts','postingan','repost','share','like','likes','view','views','follow','follower','followers','following','disematkan','pinned','terjemahkan','translate','selengkapnya','more','less','http','https','www','com','co','id','net','org','link','tautan','url','video','foto','gambar','reel','reels','story','stories','live','akun','account','user','username','profil','profile','bio','dm','fyp','vt','op','ts',
+]);
+
+const UI_NOISE_PATTERNS = [
+  /\b(tampilkan|sembunyikan)\s+balasan\b/gi,
+  /\bkonten\s+ai\b/gi,
+  /\bdisematkan\b/gi,
+  /\blihat\s+terjemahan\b/gi,
+  /\blihat\s+selengkapnya\b/gi,
+  /\bmeta\.ai\b/gi,
+  /\bmeta\s+ai\b/gi,
+  /https?:\/\/\S+/gi,
+  /www\.\S+/gi,
+  /@[\w.]+/g,
+];
+
+function reduceRepeatedLetters(token) {
+  return String(token || '').replace(/([\p{L}])\1{2,}$/gu, '$1');
+}
+
+function normalizeWordCloudText(text) {
+  let s = String(text || '').toLowerCase();
+  for (const pattern of UI_NOISE_PATTERNS) s = s.replace(pattern, ' ');
+  s = s.replace(/#([\p{L}\p{N}_]+)/gu, '$1');
+  s = s.replace(/\b(?:wk)+w*k*\b/gu, ' ');
+  s = s.replace(/\b(?:ha)+(?:h)?\b/gu, ' ');
+  s = s.replace(/\b(?:he)+(?:h)?\b/gu, ' ');
+  s = s.replace(/\b(?:hi)+(?:h)?\b/gu, ' ');
+  s = s.replace(/\b(?:awo?kw?o?k?)+\b/gu, ' ');
+  s = s.replace(/[^\p{L}\p{N}\s]/gu, ' ');
+  const tokens = s.split(/\s+/).map(reduceRepeatedLetters).filter(Boolean);
+  return tokens.join(' ').trim();
+}
 
 function contentKey(author, postCode, text) {
   if (SNA?.contentKey) return SNA.contentKey(author, postCode, text);
@@ -56,6 +102,8 @@ export default function SentimentPage({ embedded = false, project: projectProp, 
   const [sandboxBusy, setSandboxBusy] = useState(false);
   const [sandboxError, setSandboxError] = useState('');
   const [sandboxResult, setSandboxResult] = useState(null);
+  const [wordMode, setWordMode] = useState('cloud');
+  const [hideProjectWords, setHideProjectWords] = useState(true);
 
   useEffect(() => {
     let alive = true;
@@ -110,6 +158,7 @@ export default function SentimentPage({ embedded = false, project: projectProp, 
           postAuthor: p.author || '',
           postCode: p.code || '',
           postUrl: p.url || '',
+          replyCode: r.code || '',
           timestamp: r.timestamp || '',
           platform: r.platform || p.platform || 'Threads',
           text: r.text || '',
@@ -142,6 +191,32 @@ export default function SentimentPage({ embedded = false, project: projectProp, 
     }
     return [...freq.entries()].sort((a, b) => b[1] - a[1]).slice(0, 20);
   }, [topics]);
+
+  const hiddenProjectWords = useMemo(() => {
+    const base = normalizeWordCloudText(project || '');
+    const words = new Set(base.split(' ').filter((tok) => tok.length > 2 && !WORD_STOP.has(tok)));
+    for (const part of String(project || '').toLowerCase().split(/[^a-z0-9]+/)) {
+      const clean = reduceRepeatedLetters(part);
+      if (clean.length > 2 && !WORD_STOP.has(clean)) words.add(clean);
+    }
+    return words;
+  }, [project]);
+
+  const wordCounts = useMemo(() => {
+    const freq = new Map();
+    for (const e of entries) {
+      const text = normalizeWordCloudText(e.text);
+      if (!text) continue;
+      for (const tok of text.split(' ')) {
+        if (tok.length <= 2 || /^\d+$/.test(tok) || WORD_STOP.has(tok)) continue;
+        if (hideProjectWords && hiddenProjectWords.has(tok)) continue;
+        freq.set(tok, (freq.get(tok) || 0) + 1);
+      }
+    }
+    return [...freq.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).slice(0, 40);
+  }, [entries, hideProjectWords, hiddenProjectWords]);
+
+  const wordMax = wordCounts[0]?.[1] || 1;
 
   const filtered = useMemo(() => {
     const term = q.trim().toLowerCase();
@@ -437,9 +512,26 @@ export default function SentimentPage({ embedded = false, project: projectProp, 
                       <span className="text-slate-400">·</span>
                       <span className="text-slate-500 dark:text-slate-400">{e.platform}</span>
                     </div>
-                    <time className="font-mono text-[11px] tabular-nums text-slate-400">
-                      {e.timestamp ? new Date(e.timestamp).toLocaleString('id-ID') : '-'}
-                    </time>
+                    <div className="flex items-center gap-2">
+                      <time className="font-mono text-[11px] tabular-nums text-slate-400">
+                        {e.timestamp ? new Date(e.timestamp).toLocaleString('id-ID') : '-'}
+                      </time>
+                      {(() => {
+                        const href = itemUrl({ author: e.author, code: e.replyCode }, { author: e.postAuthor, code: e.postCode, url: e.postUrl });
+                        return href ? (
+                          <a
+                            href={href}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            aria-label="Buka di Threads"
+                            title="Buka di Threads"
+                            className="text-slate-400 transition-colors hover:text-blue-600 dark:text-slate-500 dark:hover:text-blue-400"
+                          >
+                            <ExternalLink className="h-3.5 w-3.5" />
+                          </a>
+                        ) : null;
+                      })()}
+                    </div>
                   </div>
 
                   <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px]">
@@ -589,6 +681,89 @@ export default function SentimentPage({ embedded = false, project: projectProp, 
                 <p className="text-xs text-slate-500 dark:text-slate-400">Belum ada kata kunci.</p>
               )}
             </div>
+          </div>
+
+          <div className="surface p-4">
+            <div className="mb-3 flex items-start justify-between gap-2">
+              <div>
+                <h3 className="text-sm font-semibold text-slate-900 dark:text-white">Word Cloud Komentar</h3>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400">Frekuensi kata dari teks komentar</p>
+              </div>
+              <div className="inline-flex rounded-lg border border-slate-200 p-0.5 dark:border-slate-700">
+                {[
+                  ['cloud', 'Cloud'],
+                  ['count', 'Count'],
+                ].map(([id, label]) => (
+                  <button
+                    key={id}
+                    type="button"
+                    onClick={() => setWordMode(id)}
+                    className={`rounded-md px-2 py-1 text-[11px] font-medium transition-colors ${
+                      wordMode === id
+                        ? 'bg-blue-600 text-white dark:bg-blue-500'
+                        : 'text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800'
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <label className="mb-3 inline-flex cursor-pointer items-center gap-2 text-[11px] text-slate-600 dark:text-slate-300">
+              <input
+                type="checkbox"
+                checked={hideProjectWords}
+                onChange={(e) => setHideProjectWords(e.target.checked)}
+                className="accent-blue-600"
+              />
+              <span>Sembunyikan kata proyek ({project || 'default'})</span>
+            </label>
+
+            {wordCounts.length === 0 ? (
+              <p className="text-xs text-slate-500 dark:text-slate-400">Belum ada kata yang bisa dihitung.</p>
+            ) : wordMode === 'cloud' ? (
+              <div className="flex flex-wrap items-end gap-x-3 gap-y-2">
+                {wordCounts.slice(0, 35).map(([word, count], idx) => {
+                  const size = 11 + (count / wordMax) * 20;
+                  const tone = idx < 4
+                    ? 'text-blue-700 dark:text-blue-300'
+                    : idx < 10
+                      ? 'text-slate-800 dark:text-slate-100'
+                      : 'text-slate-600 dark:text-slate-300';
+                  return (
+                    <button
+                      key={word}
+                      type="button"
+                      title={`${word}: ${nf(count)} komentar`}
+                      onClick={() => setQ((cur) => (cur === word ? '' : word))}
+                      className={`leading-none transition-colors hover:text-blue-600 dark:hover:text-blue-400 ${tone} ${q === word ? 'font-semibold text-blue-600 underline dark:text-blue-400' : ''}`}
+                      style={{ fontSize: `${size}px` }}
+                    >
+                      {word}
+                    </button>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {wordCounts.slice(0, 15).map(([word, count]) => (
+                  <button
+                    key={word}
+                    type="button"
+                    onClick={() => setQ((cur) => (cur === word ? '' : word))}
+                    className="block w-full text-left"
+                  >
+                    <div className="mb-1 flex items-center justify-between gap-2 text-xs">
+                      <span className={q === word ? 'font-medium text-blue-600 dark:text-blue-400' : 'text-slate-700 dark:text-slate-200'}>{word}</span>
+                      <span className="font-mono text-[11px] tabular-nums text-slate-500 dark:text-slate-400">{nf(count)}</span>
+                    </div>
+                    <div className="h-1.5 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700">
+                      <div className="h-full rounded-full bg-blue-600 dark:bg-blue-500" style={{ width: `${(count / wordMax) * 100}%` }} />
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
         </aside>
       </div>
