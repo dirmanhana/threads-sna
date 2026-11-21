@@ -270,10 +270,22 @@ def _build_result(cfg: dict, items: list[dict], topics: list[dict], labels: dict
         t2 = dict(t)
         t2["count"] = counts.get(t["id"], 0)
         topics_out.append(t2)
+    texts = [str(it.get("text", "")).lower() for it in items]
     keywords = []
+    seen_terms: set[str] = set()
     for t in topics_out:
         for kw in t.get("keywords", []):
-            keywords.append({"term": kw, "topic": t["id"], "count": t["count"]})
+            term = str(kw).strip().lower()
+            if not term or term in seen_terms:
+                continue
+            seen_terms.add(term)
+            mention_count = sum(1 for tx in texts if term in tx)
+            keywords.append({
+                "term": term,
+                "topic": t["id"],
+                "count": mention_count,
+                "topic_count": t["count"],
+            })
     keywords.sort(key=lambda x: (-x["count"], x["term"]))
     return {
         "schema": 1,
