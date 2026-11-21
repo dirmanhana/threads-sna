@@ -162,7 +162,7 @@ export default function SummaryPage({ embedded = false, project: projectProp, on
         `• Ringkasan: ${nf(stats.posts)} postingan dan ${nf(stats.comments)} komentar dari ${nf(stats.accounts)} akun dengan ${nf(stats.links)} relasi.`,
         labeled
           ? `• Sentimen: ${posPct}% positif, ${negPct}% negatif dari ${nf(labeled)} komentar berlabel; ${nf(sentimentCounts.toxic)} terindikasi toksik dan ${nf(sentimentCounts.spam)} spam.`
-          : '• Sentimen: belum ada komentar berlabel; jalankan Analisis Gemini untuk klasifikasi.',
+          : '• Sentimen: belum ada komentar berlabel; jalankan Analisis AI untuk klasifikasi.',
         `• Topik dominan: ${topTopic}. Aktor sentral: ${top}.`,
         `• Anomali: ${nf(stats.highRisk)} akun risiko tinggi, ${nf(cib.clusters.length)} klaster terkoordinasi, ${nf(temporal.bursts.length)} lonjakan aktivitas.`,
         '• Saran: tinjau akun/klaster berisiko di Peta Jaringan dan prioritaskan respons pada topik dengan sentimen negatif tinggi.',
@@ -302,7 +302,7 @@ export default function SummaryPage({ embedded = false, project: projectProp, on
                   disabled={analyzing}
                   className="btn-primary mt-3"
                 >
-                  {analyzing ? 'Menganalisis...' : 'Jalankan Analisis Gemini'}
+                  {analyzing ? 'Menganalisis...' : 'Jalankan Analisis AI'}
                 </button>
               </div>
             )}
@@ -452,7 +452,7 @@ export default function SummaryPage({ embedded = false, project: projectProp, on
           <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
             <div>
               <h2 className="text-sm font-semibold text-slate-900 dark:text-white">
-                Ringkasan Intelijen Eksekutif (Gemini AI)
+                Ringkasan Intelijen Eksekutif
               </h2>
               <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
                 Sintesis otomatis narasi publik, polarisasi aktor, dan langkah respons

@@ -162,7 +162,7 @@ export default function App() {
     });
     if (r.ok || r.status === 409) {
       setAnalyzing(true);
-      setBanner({ kind: 'info', text: 'Analisis Gemini dimulai untuk proyek ini...' });
+      setBanner({ kind: 'info', text: 'Analisis AI dimulai untuk proyek ini...' });
     } else if (r.status === 404 || r.status === 501) {
       setBanner({ kind: 'error', text: 'Server analisis tidak aktif. Jalankan lewat ./run.sh serve.' });
     } else {
@@ -197,7 +197,7 @@ export default function App() {
       >
         <div className="flex h-14 items-center justify-between border-b border-slate-200 px-5 dark:border-slate-800">
           <span className="font-display text-base font-bold tracking-tight text-slate-900 dark:text-white whitespace-nowrap shrink-0">
-            NusaPulse
+            Snail
           </span>
           <button
             type="button"
@@ -335,7 +335,7 @@ export default function App() {
               className="btn-primary"
             >
               <Sparkles className="h-3.5 w-3.5" />
-              {analyzing ? 'Menganalisis...' : 'Analisis Gemini'}
+              {analyzing ? 'Menganalisis...' : 'Analisis AI'}
             </button>
           </div>
         </header>

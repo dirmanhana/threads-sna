@@ -34,6 +34,7 @@ export default function ViewerPage({ embedded = false, project: projectProp, onT
   const [focus, setFocus] = useState(null);
   const [isolate, setIsolate] = useState(false);
   const [riskHighlight, setRiskHighlight] = useState(true);
+  const [hulls, setHulls] = useState(true);
   const [selectedLink, setSelectedLink] = useState(null);
   const [selectedBucket, setSelectedBucket] = useState(null);
   const [inspectorTab, setInspectorTab] = useState('metrik');
@@ -321,6 +322,16 @@ export default function ViewerPage({ embedded = false, project: projectProp, onT
           <span>Sorot risiko</span>
         </label>
 
+        <label className="inline-flex cursor-pointer items-center gap-1.5 text-xs text-slate-600 dark:text-slate-300">
+          <input
+            type="checkbox"
+            checked={hulls}
+            onChange={(e) => setHulls(e.target.checked)}
+            className="accent-emerald-600"
+          />
+          <span>Gelembung</span>
+        </label>
+
         {/* Time-lapse controls */}
         <div className="flex items-center gap-2 border-l border-slate-200 pl-3 dark:border-slate-800">
           <button
@@ -406,6 +417,7 @@ export default function ViewerPage({ embedded = false, project: projectProp, onT
             riskHighlight={riskHighlight}
             riskById={riskById}
             keyword={appliedKw}
+            hulls={hulls}
             onNodeClick={onNodeClick}
             onLinkClick={onLinkClick}
             onBackgroundClick={onBackgroundClick}

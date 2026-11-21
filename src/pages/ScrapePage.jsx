@@ -175,7 +175,11 @@ export default function ScrapePage({ embedded = false, project: projectProp, onT
   };
 
   const currentMode = MODES.find((m) => m.id === mode) || MODES[0];
-  const pct = status.total ? Math.round(((status.current || 0) / status.total) * 100) : (status.phase === 'done' ? 100 : 0);
+  const progressDone = Number(status.done ?? status.current ?? 0);
+  const progressTotal = Number(status.total || 0);
+  const pct = progressTotal
+    ? Math.round((progressDone / progressTotal) * 100)
+    : (status.phase === 'done' ? 100 : 0);
   const data = status.data || {};
   const activeProject = projects.find((p) => p.slug === project);
 
@@ -284,7 +288,7 @@ export default function ScrapePage({ embedded = false, project: projectProp, onT
             <div className="mt-4 space-y-2 border-t border-slate-100 pt-3 dark:border-slate-800">
               <div className="flex items-center justify-between text-xs">
                 <span className="font-medium text-slate-700 dark:text-slate-200">{PHASE[status.phase] || status.phase || 'Status'}</span>
-                <span className="font-mono tabular-nums text-slate-500 dark:text-slate-400">{status.current || 0}/{status.total || 0} ({pct}%)</span>
+                <span className="font-mono tabular-nums text-slate-500 dark:text-slate-400">{progressDone}/{progressTotal} ({pct}%)</span>
               </div>
               <Bar value={pct} />
               {status.message && <p className="text-xs text-slate-600 dark:text-slate-300">{status.message}</p>}

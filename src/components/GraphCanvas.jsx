@@ -8,7 +8,7 @@ const edgeColor = (t) => (t === 'mention' ? 'var(--c2)' : t === 'co-comment' ? '
 /* Komponen graf D3 imperatif. State/UI lain tetap dipegang React (ViewerPage). */
 const GraphCanvas = forwardRef(function GraphCanvas(props, ref) {
   const {
-    graph, metrics, colorBy, focus, isolate, riskHighlight, riskById, keyword,
+    graph, metrics, colorBy, focus, isolate, riskHighlight, riskById, keyword, hulls = true,
     onNodeClick, onLinkClick, onBackgroundClick,
   } = props;
 
@@ -22,6 +22,7 @@ const GraphCanvas = forwardRef(function GraphCanvas(props, ref) {
   const tipEl = useRef(null);
   const propsRef = useRef(props);
   propsRef.current = props;
+  const hullUpdateRef = useRef(null);
   const fitRef = useRef(null);
   const fitTimer = useRef(null);
   const userZoom = useRef(false);
@@ -38,8 +39,14 @@ const GraphCanvas = forwardRef(function GraphCanvas(props, ref) {
       if (e.sourceEvent) userZoom.current = true;
       const root = d3.select(rootEl.current);
       root.attr('transform', e.transform);
-      // Label akun disembunyikan saat memperkecil agar tidak menutupi graf.
-      root.classed('sna-zoom-out', e.transform.k < .45);
+      // Makro: label dan komentator kecil disembunyikan, gelembung komunitas tampil.
+      const macro = e.transform.k < .45;
+      root.classed('sna-zoom-out', macro);
+      const p = propsRef.current;
+      nodeSel.current?.style('display', (d) => (
+        macro && p.hulls && (Number(d.deg || 0) <= 1) && !d.posts ? 'none' : null
+      ));
+      hullUpdateRef.current?.(macro);
     });
     zoomRef.current = zoom;
     svg.call(zoom).on('dblclick.zoom', null);
@@ -118,6 +125,45 @@ const GraphCanvas = forwardRef(function GraphCanvas(props, ref) {
     return n.posts ? 'var(--c3)' : 'var(--mut)';
   }
 
+  /* Convex hull per komunitas — tampilan makro saat zoom out. */
+  function updateHulls(show) {
+    const root = d3.select(rootEl.current);
+    if (!root.node()) return;
+    let layer = root.select('g.sna-hulls');
+    if (layer.empty()) layer = root.insert('g', ':first-child').attr('class', 'sna-hulls');
+    const p = propsRef.current;
+    if (!show || !p.hulls || !p.metrics?.communities?.size) {
+      layer.selectAll('*').remove();
+      return;
+    }
+    const groups = new Map();
+    (p.graph?.nodes || []).forEach((n) => {
+      if (!Number.isFinite(n.x) || !Number.isFinite(n.y)) return;
+      const c = p.metrics.communities.get(n.id) ?? 0;
+      if (!groups.has(c)) groups.set(c, []);
+      groups.get(c).push(n);
+    });
+    const items = [];
+    groups.forEach((arr, c) => {
+      if (arr.length < 3) return;
+      let poly = d3.polygonHull(arr.map((n) => [n.x, n.y]));
+      if (!poly || poly.length < 3) return;
+      if (poly.length > 1 && poly[0][0] === poly[poly.length - 1][0] && poly[0][1] === poly[poly.length - 1][1]) poly = poly.slice(0, -1);
+      items.push({ c, poly });
+    });
+    const line = d3.line().curve(d3.curveCatmullRomClosed.alpha(0.6));
+    const sc = d3.schemeTableau10 || d3.schemeCategory10;
+    layer.selectAll('path').data(items, (d) => d.c).join('path')
+      .attr('d', (d) => line(d.poly))
+      .attr('fill', (d) => sc[d.c % sc.length])
+      .attr('fill-opacity', 0.12)
+      .attr('stroke', (d) => sc[d.c % sc.length])
+      .attr('stroke-opacity', 0.4)
+      .attr('stroke-width', 1.5)
+      .style('pointer-events', 'none');
+  }
+  hullUpdateRef.current = updateHulls;
+
   function draw() {
     const p = propsRef.current;
     const g = p.graph || { nodes: [], links: [] };
@@ -186,6 +232,8 @@ const GraphCanvas = forwardRef(function GraphCanvas(props, ref) {
     const n = g.nodes.length;
     const charge = -320 * Math.max(.18, Math.min(1, 160 / Math.max(1, n)));
     const dist = n > 400 ? 70 : 110;
+    let tickCount = 0;
+    const macroNow = () => d3.zoomTransform(svgNode).k < .45;
     simRef.current = d3.forceSimulation(g.nodes)
       .force('l', d3.forceLink(g.links).id((d) => d.id).distance(dist))
       .force('c', d3.forceManyBody().strength(charge))
@@ -196,12 +244,14 @@ const GraphCanvas = forwardRef(function GraphCanvas(props, ref) {
           .attr('x2', (d) => d.target.x).attr('y2', (d) => d.target.y);
         nd.attr('transform', (d) => `translate(${d.x},${d.y})`);
         g.nodes.forEach((n) => posRef.current.set(n.id, { x: n.x, y: n.y }));
+        if (++tickCount % 12 === 0) hullUpdateRef.current?.(macroNow());
       })
-      .on('end', () => fitView());
+      .on('end', () => { fitView(); hullUpdateRef.current?.(macroNow()); });
     // Simulasi besar butuh beberapa detik; fit lebih awal agar graf langsung terlihat.
     fitTimer.current = setTimeout(() => {
       fitView();
-      fitTimer.current = setTimeout(() => fitView(), 1500);
+      hullUpdateRef.current?.(macroNow());
+      fitTimer.current = setTimeout(() => { fitView(); hullUpdateRef.current?.(macroNow()); }, 1500);
     }, 900);
   }
 
@@ -224,7 +274,7 @@ const GraphCanvas = forwardRef(function GraphCanvas(props, ref) {
     getSvg: () => svgEl.current,
   }));
 
-  useEffect(() => { draw(); }, [graph, colorBy, focus, isolate, riskHighlight, metrics]);
+  useEffect(() => { draw(); }, [graph, colorBy, focus, isolate, riskHighlight, metrics, hulls]);
 
   return (
     <>

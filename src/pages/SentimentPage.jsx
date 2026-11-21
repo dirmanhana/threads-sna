@@ -196,10 +196,10 @@ export default function SentimentPage({ embedded = false, project: projectProp, 
         const data = await resp.json();
         setSandboxResult(data);
       } else {
-        setSandboxError('Fitur uji klasifikasi instan tidak tersedia di server ini. Gunakan Analisis Gemini batch untuk melabeli komentar.');
+        setSandboxError('Fitur uji klasifikasi instan tidak tersedia di server ini. Gunakan Analisis AI batch untuk melabeli komentar.');
       }
     } catch {
-      setSandboxError('Fitur uji klasifikasi instan tidak tersedia di server ini. Gunakan Analisis Gemini batch untuk melabeli komentar.');
+      setSandboxError('Fitur uji klasifikasi instan tidak tersedia di server ini. Gunakan Analisis AI batch untuk melabeli komentar.');
     } finally {
       setSandboxBusy(false);
     }
@@ -226,7 +226,7 @@ export default function SentimentPage({ embedded = false, project: projectProp, 
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
           <div>
             <h2 className="text-sm font-semibold text-slate-900 dark:text-white">
-              Uji Klasifikasi Sentimen Real-Time (Gemini AI)
+              Uji Klasifikasi Sentimen Real-Time
             </h2>
             <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
               Tempel komentar atau keluhan pelanggan untuk menguji deteksi sentimen, emosi, toksisitas, dan spam secara instan
