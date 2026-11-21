@@ -255,50 +255,86 @@ def normalize_labels(raw, size: int, topic_ids: set[int]) -> dict[int, dict]:
     return out
 
 
-def analyze(cfg: dict, items: list[dict], batch_size: int, timeout: int,
-            with_topics: bool = True, on_progress=None) -> dict:
-    topics: list[dict] = []
-    if with_topics and items:
-        sample = sorted(items, key=lambda x: len(x["text"]), reverse=True)[:120]
-        try:
-            topics = normalize_topics(llm_json(cfg, topics_prompt(sample, len(sample)), timeout))
-        except Exception as exc:  # topik gagal tidak boleh menggagalkan sentimen
-            print("Peringatan: topik gagal dibuat (%s); lanjut tanpa topik." % exc, file=sys.stderr)
-    topic_ids = {t["id"] for t in topics} or {0}
-
-    labels: dict[str, dict] = {}
-    chunks = [items[i:i + batch_size] for i in range(0, len(items), batch_size)]
-    for n, batch in enumerate(chunks, 1):
-        result = normalize_labels(
-            llm_json(cfg, label_prompt(batch, topics), timeout), len(batch), topic_ids)
-        for i, it in enumerate(batch, 1):
-            if i in result:
-                labels[it["key"]] = result[i]
-        if on_progress:
-            on_progress(n, len(chunks), len(labels))
-        elif n % 5 == 0 or n == len(chunks):
-            print("  batch %d/%d" % (n, len(chunks)), file=sys.stderr)
-
+def _build_result(cfg: dict, items: list[dict], topics: list[dict], labels: dict[str, dict]) -> dict:
     counts = {t["id"]: 0 for t in topics}
     for v in labels.values():
-        counts[v["topic"]] = counts.get(v["topic"], 0) + 1
+        tid = v.get("topic")
+        if tid in counts:
+            counts[tid] += 1
+        elif counts:
+            # tetap hitung ke bucket yang dikenal agar konsisten
+            fallback = sorted(counts.keys())[0]
+            counts[fallback] = counts.get(fallback, 0) + 1
+    topics_out = []
     for t in topics:
-        t["count"] = counts.get(t["id"], 0)
+        t2 = dict(t)
+        t2["count"] = counts.get(t["id"], 0)
+        topics_out.append(t2)
     keywords = []
-    for t in topics:
-        for kw in t["keywords"]:
+    for t in topics_out:
+        for kw in t.get("keywords", []):
             keywords.append({"term": kw, "topic": t["id"], "count": t["count"]})
     keywords.sort(key=lambda x: (-x["count"], x["term"]))
-
     return {
         "schema": 1,
         "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "model": cfg.get("LLM_MODEL") or "cmd",
-        "counts": {"comments": len(items), "labeled": len(labels), "topics": len(topics)},
-        "topics": topics,
+        "counts": {"comments": len(items), "labeled": len(labels), "topics": len(topics_out)},
+        "topics": topics_out,
         "keywords": keywords,
         "comments": labels,
     }
+
+
+def analyze(cfg: dict, items: list[dict], batch_size: int, timeout: int,
+            with_topics: bool = True, on_progress=None, on_partial=None) -> dict:
+    topics: list[dict] = []
+    chunks = [items[i:i + batch_size] for i in range(0, len(items), batch_size)] if items else []
+    total = len(chunks)
+
+    if on_progress:
+        try:
+            on_progress(0, total, 0)
+        except Exception:
+            pass
+
+    if with_topics and items:
+        sample = sorted(items, key=lambda x: len(x.get("text", "")), reverse=True)[:80]
+        try:
+            topics = normalize_topics(llm_json(cfg, topics_prompt(sample, len(sample)), timeout))
+        except Exception as exc:  # topik gagal tidak boleh menggagalkan sentimen
+            print("Peringatan: topik gagal dibuat (%s); lanjut tanpa topik." % exc, file=sys.stderr)
+        if on_partial:
+            try:
+                on_partial(_build_result(cfg, items, topics, {}))
+            except Exception:
+                pass
+    topic_ids = {t["id"] for t in topics} or {0}
+
+    labels: dict[str, dict] = {}
+    for n, batch in enumerate(chunks, 1):
+        try:
+            result = normalize_labels(
+                llm_json(cfg, label_prompt(batch, topics), timeout), len(batch), topic_ids)
+            for i, it in enumerate(batch, 1):
+                if i in result:
+                    labels[it["key"]] = result[i]
+        except Exception as exc:
+            print("Peringatan: batch %d/%d gagal (%s); lanjut." % (n, total, exc), file=sys.stderr)
+        if on_progress:
+            try:
+                on_progress(n, total, len(labels))
+            except Exception:
+                pass
+        elif n % 5 == 0 or n == total:
+            print("  batch %d/%d" % (n, total), file=sys.stderr)
+        if on_partial:
+            try:
+                on_partial(_build_result(cfg, items, topics, labels))
+            except Exception:
+                pass
+
+    return _build_result(cfg, items, topics, labels)
 
 
 def main(argv=None) -> int:
@@ -354,19 +390,31 @@ def main(argv=None) -> int:
     print("Menganalisis %d komentar dengan %s …" % (len(items), cfg.get("LLM_MODEL") or "cmd"),
           file=sys.stderr)
 
+    out = Path(a.out)
+    out.parent.mkdir(parents=True, exist_ok=True)
+
+    def save_partial(res):
+        try:
+            tmp = out.with_suffix(out.suffix + ".tmp")
+            tmp.write_text(json.dumps(res, ensure_ascii=False, indent=1), encoding="utf-8")
+            tmp.replace(out)
+        except Exception as exc:
+            print("Peringatan: gagal menulis hasil parsial (%s)" % exc, file=sys.stderr)
+
     def progress(n, total, labeled):
         if a.progress_file:
-            Path(a.progress_file).write_text(
-                json.dumps({"done": n, "total": total, "labeled": labeled}), encoding="utf-8")
-        else:
-            print("  batch %d/%d" % (n, total), file=sys.stderr)
+            try:
+                Path(a.progress_file).parent.mkdir(parents=True, exist_ok=True)
+                Path(a.progress_file).write_text(
+                    json.dumps({"done": n, "total": total, "labeled": labeled}), encoding="utf-8")
+            except Exception:
+                pass
+        if n == 0 or n % 5 == 0 or n == total:
+            print("  batch %d/%d (berlabel: %d)" % (n, total, labeled), file=sys.stderr)
 
     result = analyze(cfg, items, batch, timeout, with_topics=not a.no_topic,
-                     on_progress=progress if a.progress_file else None)
-    out = Path(a.out)
-    tmp = out.with_suffix(out.suffix + ".tmp")
-    tmp.write_text(json.dumps(result, ensure_ascii=False, indent=1), encoding="utf-8")
-    tmp.replace(out)
+                     on_progress=progress, on_partial=save_partial)
+    save_partial(result)
     print("Selesai: %s (%d label, %d topik)" %
           (out.name, result["counts"]["labeled"], result["counts"]["topics"]), file=sys.stderr)
     return 0

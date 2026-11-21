@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { Search } from 'lucide-react';
 import { getJson } from '../lib/utils.js';
 import { currentProject, projectFile, withProject } from '../lib/project.js';
 
@@ -92,9 +93,7 @@ export default function GlobalSearch() {
   return (
     <div ref={boxRef} className="relative w-full min-w-0 max-w-md">
       <div className="relative">
-        <svg className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-          <path d="M10 4a6 6 0 1 0 3.5 10.9l4.3 4.3 1.4-1.4-4.3-4.3A6 6 0 0 0 10 4Zm0 2a4 4 0 1 1 0 8 4 4 0 0 1 0-8Z" />
-        </svg>
+        <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
         <input
           ref={inputRef}
           type="search"
@@ -102,9 +101,9 @@ export default function GlobalSearch() {
           onFocus={() => { load(); setOpen(true); }}
           onChange={(e) => { setQ(e.target.value); setActive(0); setOpen(true); }}
           onKeyDown={onKeyDown}
-          placeholder="Cari akun atau postingan…"
+          placeholder="Cari @akun atau kata kunci..."
           aria-label="Pencarian global"
-          className="h-9 w-full rounded-lg border border-slate-200 bg-slate-50 pl-9 pr-3 text-xs text-slate-700 outline-none transition placeholder:text-slate-400 focus:border-blue-500 focus:bg-white focus:ring-2 focus:ring-blue-500/15 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-100 dark:focus:bg-slate-900 dark:focus:ring-blue-900/40"
+          className="input-field h-9 w-full bg-slate-50 pl-9 pr-3 dark:bg-slate-900"
         />
       </div>
 

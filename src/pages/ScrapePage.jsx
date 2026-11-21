@@ -1,8 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import Layout from '../components/Layout.jsx';
-import Card, { CardBody, CardHeader } from '../components/Card.jsx';
-import StatusPill from '../components/StatusPill.jsx';
-import { api, formatDate } from '../lib/utils.js';
+import { Plus, Upload, Download, Trash2 } from 'lucide-react';
+import { api, formatDate, getJson } from '../lib/utils.js';
 import { currentProject as getProject, projectFile, switchProject } from '../lib/project.js';
 
 const nf = (v) => Number(v || 0).toLocaleString('id-ID');
@@ -21,232 +19,429 @@ function Bar({ value }) {
   );
 }
 
-export default function ScrapePage({ embedded = false, project: projectProp, onProjectChange }) {
+function downloadText(filename, content, mime = 'application/json;charset=utf-8') {
+  const blob = new Blob([content], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+export default function ScrapePage({ embedded = false, project: projectProp, onTab, onProjectChange }) {
   const project = projectProp || getProject();
-  const [mode, setMode] = useState('profile');
-  const [target, setTarget] = useState('');
-  const [maxPosts, setMaxPosts] = useState(10);
-  const [maxReplies, setMaxReplies] = useState(400);
-  const [merge, setMerge] = useState(true);
-  const [status, setStatus] = useState(null);
-  const [warn, setWarn] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [serverOk, setServerOk] = useState(true);
   const [projects, setProjects] = useState([]);
   const [newName, setNewName] = useState('');
-  const [projectBusy, setProjectBusy] = useState(false);
+  const [projBusy, setProjBusy] = useState(false);
+  const [projMsg, setProjMsg] = useState('');
+
+  const [mode, setMode] = useState('profile');
+  const [target, setTarget] = useState('');
+  const [maxPosts, setMaxPosts] = useState(20);
+  const [maxReplies, setMaxReplies] = useState(100);
+  const [merge, setMerge] = useState(true);
+
+  const [status, setStatus] = useState({ running: false, phase: null, log: [] });
+  const [login, setLogin] = useState({ logged_in: false, running: false });
+  const [notice, setNotice] = useState(null);
+  const [busy, setBusy] = useState(false);
   const logRef = useRef(null);
+  const fileRef = useRef(null);
 
-  const refresh = useCallback(async () => {
-    const r = await api('/api/scrape/status?project=' + encodeURIComponent(project));
-    if (!r.ok) { setServerOk(false); return; }
-    setServerOk(true); setStatus(r.data);
-  }, [project]);
-
-  const refreshProjects = useCallback(async () => {
+  const loadProjects = useCallback(async () => {
     const r = await api('/api/projects');
     if (r.ok) setProjects(Array.isArray(r.data?.projects) ? r.data.projects : []);
   }, []);
 
-  useEffect(() => { refresh(); const id = setInterval(refresh, 1500); return () => clearInterval(id); }, [refresh]);
-  useEffect(() => { refreshProjects(); }, [refreshProjects]);
+  useEffect(() => { loadProjects(); }, [loadProjects, project]);
 
-  const log = status?.log || [];
-  useEffect(() => { if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight; }, [log.length]);
+  const load = useCallback(async () => {
+    const [s, l] = await Promise.all([
+      api('/api/scrape/status?project=' + encodeURIComponent(project)),
+      api('/api/login/status'),
+    ]);
+    if (s.ok) setStatus(s.data || {});
+    if (l.ok) setLogin(l.data || {});
+  }, [project]);
 
-  const send = async (path, body) => {
-    setBusy(true);
-    const r = await api(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, ...(body ? { body: JSON.stringify(body) } : {}) });
+  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    if (!status.running && !login.running) return;
+    const id = setInterval(load, 1500);
+    return () => clearInterval(id);
+  }, [status.running, login.running, load]);
+
+  useEffect(() => {
+    if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
+  }, [status.log?.length]);
+
+  const startScrape = async (e) => {
+    e?.preventDefault?.();
+    if (!target.trim()) { setNotice({ kind: 'err', text: 'Isi target terlebih dahulu.' }); return; }
+    setBusy(true); setNotice(null);
+    const r = await api('/api/scrape/start', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ project, mode, target: target.trim(), maxPosts: Number(maxPosts) || 20, maxReplies: Number(maxReplies) || 100, merge }),
+    });
     setBusy(false);
-    if (!r.ok && r.status !== 404) setWarn(r.data?.message || 'Permintaan gagal.');
-    else if (r.status === 404) setWarn('Server API tidak tersedia. Jalankan lewat ./run.sh serve.');
-    else setWarn('');
-    await refresh();
-    return r;
-  };
-
-  const startLogin = () => send('/api/login/start');
-  const confirmLogin = () => send('/api/login/confirm');
-  const cancelLogin = () => send('/api/login/cancel');
-  const cancelScrape = () => send('/api/scrape/cancel');
-  const startScrape = () => {
-    if (!target.trim()) { setWarn('Isi target terlebih dahulu.'); return; }
-    return send('/api/scrape/start', { project, mode, target: target.trim(), maxPosts: Number(maxPosts) || 10, maxReplies: Number(maxReplies) || 400, merge });
-  };
-
-  const selectProject = (slug) => {
-    if (embedded && onProjectChange) {
-      onProjectChange(slug);
-      try { localStorage.setItem('sna-project', slug); const u = new URL(globalThis.location.href); u.searchParams.set('project', slug); globalThis.history.replaceState({}, '', u.pathname + u.search + u.hash); } catch { /* ignore */ }
+    if (r.ok || r.status === 202 || r.status === 409) {
+      setNotice({ kind: 'ok', text: r.data?.message || 'Pengambilan data dimulai.' });
+      load();
     } else {
-      switchProject(slug);
+      setNotice({ kind: 'err', text: r.data?.message || 'Gagal memulai pengambilan data.' });
     }
   };
 
-  const createProject = async () => {
-    const name = newName.trim();
-    if (!name) { setWarn('Isi nama proyek baru.'); return; }
-    setProjectBusy(true);
-    const r = await api('/api/projects', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) });
-    setProjectBusy(false);
-    if (!r.ok) { setWarn(r.data?.message || 'Gagal membuat proyek.'); return; }
-    await refreshProjects(); selectProject(r.data.project.slug); setNewName('');
+  const cancelScrape = async () => {
+    await api('/api/scrape/cancel', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ project }) });
+    load();
   };
 
-  const renameProject = async (slug) => {
-    const current = projects.find((p) => p.slug === slug);
-    const name = globalThis.prompt('Nama proyek baru', current?.name || slug);
-    if (!name || !name.trim() || name.trim() === current?.name) return;
-    setProjectBusy(true);
-    const r = await api('/api/projects/rename', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ slug, name: name.trim() }) });
-    setProjectBusy(false);
-    if (!r.ok) { setWarn(r.data?.message || 'Gagal mengganti nama proyek.'); return; }
-    await refreshProjects();
+  const loginAction = async (path) => {
+    setBusy(true);
+    const r = await api(path, { method: 'POST' });
+    setBusy(false);
+    if (r.ok || r.status === 202) {
+      setNotice({ kind: 'ok', text: r.data?.message || 'Perintah login dikirim.' });
+    } else {
+      setNotice({ kind: 'err', text: r.data?.message || 'Gagal memproses permintaan login.' });
+    }
+    load();
+  };
+
+  const createProject = async (e) => {
+    e.preventDefault();
+    if (!newName.trim()) return;
+    setProjBusy(true); setProjMsg('');
+    const r = await api('/api/projects', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: newName.trim() }),
+    });
+    setProjBusy(false);
+    if (r.ok && r.data?.project?.slug) {
+      const slug = r.data.project.slug;
+      setNewName('');
+      await loadProjects();
+      try { localStorage.setItem('sna-project', slug); } catch {}
+      if (typeof onProjectChange === 'function') onProjectChange(slug);
+      else switchProject(slug);
+    } else {
+      setProjMsg(r.data?.message || 'Gagal membuat proyek.');
+    }
   };
 
   const deleteProject = async (slug) => {
-    if (!globalThis.confirm(`Hapus proyek "${slug}"? Data dipindahkan ke projects/.trash dan bisa dipulihkan manual.`)) return;
-    setProjectBusy(true);
-    const r = await api('/api/projects/delete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ slug }) });
-    setProjectBusy(false);
-    if (!r.ok) { setWarn(r.data?.message || 'Gagal menghapus proyek.'); return; }
-    await refreshProjects();
-    const remaining = projects.filter((p) => p.slug !== slug);
-    selectProject(remaining[0]?.slug || 'default');
+    if (projects.length <= 1) return;
+    setProjBusy(true); setProjMsg('');
+    const r = await api('/api/projects/delete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ slug }),
+    });
+    setProjBusy(false);
+    if (r.ok) {
+      await loadProjects();
+      const list = projects.filter((p) => p.slug !== slug);
+      const next = list[0]?.slug || 'default';
+      if (slug === project) {
+        try { localStorage.setItem('sna-project', next); } catch {}
+        if (typeof onProjectChange === 'function') onProjectChange(next);
+      }
+    } else {
+      setProjMsg(r.data?.message || 'Gagal menghapus proyek.');
+    }
   };
 
-  const projectName = projects.find((p) => p.slug === project)?.name || project;
-  const login = status?.login || {};
-  const job = status || {};
-  const running = !!job.running;
-  const loggingIn = !!login.running;
-  const progress = job.total ? Math.round((job.done || 0) / job.total * 100) : (job.phase === 'done' ? 100 : 0);
-  const info = job.data || {};
-  const activeMode = MODES.find((m) => m.id === mode) || MODES[0];
-  const analysisInfo = job.analysis || {};
-  const dataHref = projectFile('data.json', project);
-  const llmHref = projectFile('llm_analysis.json', project);
+  const downloadDataset = async (file) => {
+    const data = await getJson(projectFile(file, project));
+    if (!data) {
+      setNotice({ kind: 'err', text: `Berkas ${file} belum tersedia untuk proyek ini.` });
+      return;
+    }
+    downloadText(`${project}-${file}`, JSON.stringify(data, null, 2));
+  };
 
-  const content = (
-    <div className="space-y-4">
-      {!serverOk && (
-        <div className="rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-800 dark:border-amber-700/60 dark:bg-amber-900/30 dark:text-amber-200">
-          Halaman ini butuh server lokal. Jalankan <code className="rounded bg-white/70 px-1 dark:bg-black/30">./run.sh serve</code>, lalu buka <code className="rounded bg-white/70 px-1 dark:bg-black/30">http://localhost:8000/scrape.html</code>.
-        </div>
-      )}
-      {warn && <div className="rounded-lg bg-red-700 px-4 py-3 text-sm text-white">{warn}<button className="ml-3 underline" onClick={() => setWarn('')}>tutup</button></div>}
+  const onImportFile = (e) => {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    // Impor tulis ke server tidak tersedia; arahkan ke Peta Jaringan (muat lokal) / salin manual.
+    setNotice({ kind: 'err', text: 'Impor ke server tidak tersedia. Muat file secara lokal di tab Peta Jaringan, atau salin ke projects/<slug>/ saat server mati.' });
+    e.target.value = '';
+  };
 
-      <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_380px]">
-        <div className="min-w-0 space-y-4">
-          <Card>
-            <CardHeader title="Ingesti & Pengumpulan Data" description={`Proyek aktif: ${projectName} · data disimpan di projects/${project}/data.json`} />
-            <CardBody className="space-y-5">
-              <div>
-                <div className="mb-2 flex flex-wrap items-center gap-2 text-xs font-semibold text-slate-700 dark:text-slate-200">
-                  <span>1 · Sesi login Threads</span>
-                  <StatusPill tone={login.active ? 'green' : 'slate'}>{login.active ? 'Aktif' : 'Belum ada'}</StatusPill>
+  const currentMode = MODES.find((m) => m.id === mode) || MODES[0];
+  const pct = status.total ? Math.round(((status.current || 0) / status.total) * 100) : (status.phase === 'done' ? 100 : 0);
+  const data = status.data || {};
+  const activeProject = projects.find((p) => p.slug === project);
+
+  return (
+    <div className="grid grid-cols-1 gap-5 xl:grid-cols-12">
+      {/* Left: Ingest/Scrape & Import */}
+      <div className="space-y-5 xl:col-span-7">
+        <section className="surface p-5">
+          <h2 className="text-sm font-semibold text-slate-900 dark:text-white">
+            Ingesti Data Langsung &amp; Klasifikasi Real-Time
+          </h2>
+          <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+            Ambil postingan/komentar dari Threads ke proyek &ldquo;{activeProject?.name || project}&rdquo; untuk memperbarui graf SNA dan sentimen
+          </p>
+
+          <form onSubmit={startScrape} className="mt-4 space-y-3">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+              <label className="block text-xs">
+                <span className="text-slate-500 dark:text-slate-400">Jenis Entri</span>
+                <select
+                  value={mode}
+                  onChange={(e) => setMode(e.target.value)}
+                  className="input-field mt-1 w-full"
+                >
+                  {MODES.map((m) => <option key={m.id} value={m.id}>{m.label}</option>)}
+                </select>
+              </label>
+
+              <label className="block text-xs">
+                <span className="text-slate-500 dark:text-slate-400">Platform</span>
+                <select value="Threads" disabled className="input-field mt-1 w-full">
+                  <option value="Threads">Threads</option>
+                </select>
+              </label>
+
+              <label className="block text-xs">
+                <span className="text-slate-500 dark:text-slate-400">Status Sesi</span>
+                <div className="input-field mt-1 flex w-full items-center justify-between">
+                  <span className={login.logged_in ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-600 dark:text-slate-300'}>
+                    {login.logged_in ? 'Login aktif' : 'Belum login'}
+                  </span>
+                  <span className="font-mono text-[11px] text-slate-400">{login.running ? 'proses' : ''}</span>
                 </div>
-                <p className="mb-2 text-xs leading-relaxed text-slate-500 dark:text-slate-400">Login hanya perlu sekali. Browser Chromium dibuka lokal; sesi disimpan di <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">threads_profile/</code>.</p>
-                {loggingIn ? (
-                  <div className="space-y-2">
-                    <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 text-xs text-blue-800 dark:border-blue-700/50 dark:bg-blue-500/10 dark:text-blue-200">Browser login terbuka. {login.message || 'Silakan login, lalu kembali ke sini.'}</div>
-                    <div className="flex flex-wrap gap-2"><button className="btn-primary" disabled={busy} onClick={confirmLogin}>✓ Saya sudah login</button><button className="btn-secondary" disabled={busy} onClick={cancelLogin}>Batalkan</button></div>
-                  </div>
-                ) : (
-                  <button className="btn-primary" disabled={busy || running} onClick={startLogin}>Buka browser login ↗</button>
+              </label>
+            </div>
+
+            <label className="block text-xs">
+              <span className="text-slate-500 dark:text-slate-400">Target ({currentMode.target})</span>
+              <input
+                type="text"
+                value={target}
+                onChange={(e) => setTarget(e.target.value)}
+                placeholder={currentMode.target}
+                className="input-field mt-1 w-full"
+              />
+              <span className="mt-1 block text-[11px] text-slate-500 dark:text-slate-400">{currentMode.hint}</span>
+            </label>
+
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+              <label className="block text-xs">
+                <span className="text-slate-500 dark:text-slate-400">Maks. postingan</span>
+                <input type="number" min={1} max={200} value={maxPosts} onChange={(e) => setMaxPosts(e.target.value)} className="input-field mt-1 w-full" />
+              </label>
+              <label className="block text-xs">
+                <span className="text-slate-500 dark:text-slate-400">Maks. balasan/post</span>
+                <input type="number" min={0} max={500} value={maxReplies} onChange={(e) => setMaxReplies(e.target.value)} className="input-field mt-1 w-full" />
+              </label>
+              <label className="flex items-end pb-2 text-xs text-slate-600 dark:text-slate-300">
+                <span className="inline-flex cursor-pointer items-center gap-2">
+                  <input type="checkbox" checked={merge} onChange={(e) => setMerge(e.target.checked)} className="accent-blue-600" />
+                  <span>Gabung dengan data yang ada</span>
+                </span>
+              </label>
+            </div>
+
+            <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <button type="button" onClick={() => loginAction('/api/login/start')} disabled={busy} className="btn-secondary">
+                  Buka Login Threads
+                </button>
+                {login.running && (
+                  <>
+                    <button type="button" onClick={() => loginAction('/api/login/confirm')} disabled={busy} className="btn-secondary">Konfirmasi Login</button>
+                    <button type="button" onClick={() => loginAction('/api/login/cancel')} disabled={busy} className="btn-secondary">Batal</button>
+                  </>
                 )}
-                {login.error && !loggingIn && <p className="mt-2 text-[11px] text-red-600 dark:text-red-300">{login.error}</p>}
               </div>
 
-              <div className="border-t border-slate-100 pt-4 dark:border-slate-800">
-                <div className="mb-3 text-xs font-semibold text-slate-700 dark:text-slate-200">2 · Ambil data</div>
-                <div className="mb-3 flex flex-wrap gap-2">
-                  {MODES.map((m) => (
-                    <button key={m.id} onClick={() => { setMode(m.id); setTarget(''); }} className={`rounded-lg border px-3 py-1.5 text-xs font-medium transition ${mode === m.id ? 'border-blue-500 bg-blue-50 text-blue-700 dark:bg-blue-500/15 dark:text-blue-300' : 'border-slate-200 text-slate-600 hover:border-blue-300 dark:border-slate-700 dark:text-slate-300'}`}>{m.label}</button>
-                  ))}
-                </div>
-                <label className="mb-3 block">
-                  <span className="mb-1 block text-[11px] font-medium text-slate-500 dark:text-slate-400">Target</span>
-                  <input className="input-field w-full" value={target} placeholder={activeMode.target} onChange={(e) => setTarget(e.target.value)} disabled={running} />
-                  <span className="mt-1 block text-[11px] text-slate-400">{activeMode.hint}</span>
-                </label>
-                <div className="mb-3 grid grid-cols-2 gap-3">
-                  <label className="block"><span className="mb-1 block text-[11px] font-medium text-slate-500 dark:text-slate-400">Jumlah postingan</span><input className="input-field w-full" type="number" min="1" max="100" value={maxPosts} onChange={(e) => setMaxPosts(e.target.value)} disabled={running} /></label>
-                  <label className="block"><span className="mb-1 block text-[11px] font-medium text-slate-500 dark:text-slate-400">Maks. komentar per post</span><input className="input-field w-full" type="number" min="1" max="1000" value={maxReplies} onChange={(e) => setMaxReplies(e.target.value)} disabled={running} /></label>
-                </div>
-                <div className="mb-3">
-                  <span className="mb-1 block text-[11px] font-medium text-slate-500 dark:text-slate-400">Simpan hasil</span>
-                  <div className="flex flex-wrap gap-2">
-                    <button onClick={() => setMerge(true)} disabled={running} className={`rounded-lg border px-3 py-1.5 text-xs ${merge ? 'border-blue-500 bg-blue-50 text-blue-700 dark:bg-blue-500/15 dark:text-blue-300' : 'border-slate-200 text-slate-600 dark:border-slate-700 dark:text-slate-300'}`}>Gabungkan dengan data lama</button>
-                    <button onClick={() => setMerge(false)} disabled={running} className={`rounded-lg border px-3 py-1.5 text-xs ${!merge ? 'border-amber-500 bg-amber-50 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300' : 'border-slate-200 text-slate-600 dark:border-slate-700 dark:text-slate-300'}`}>Timpa data lama</button>
+              <div className="flex items-center gap-2">
+                {status.running ? (
+                  <button type="button" onClick={cancelScrape} className="btn-secondary">Hentikan</button>
+                ) : null}
+                <button
+                  type="submit"
+                  disabled={busy || status.running || !target.trim()}
+                  className="btn-primary"
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                  {status.running ? 'Mengambil...' : 'Kirim ke Aliran Data'}
+                </button>
+              </div>
+            </div>
+          </form>
+
+          {(status.running || status.phase) && (
+            <div className="mt-4 space-y-2 border-t border-slate-100 pt-3 dark:border-slate-800">
+              <div className="flex items-center justify-between text-xs">
+                <span className="font-medium text-slate-700 dark:text-slate-200">{PHASE[status.phase] || status.phase || 'Status'}</span>
+                <span className="font-mono tabular-nums text-slate-500 dark:text-slate-400">{status.current || 0}/{status.total || 0} ({pct}%)</span>
+              </div>
+              <Bar value={pct} />
+              {status.message && <p className="text-xs text-slate-600 dark:text-slate-300">{status.message}</p>}
+              {status.error && <p className="text-xs text-red-600 dark:text-red-400">{status.error}</p>}
+            </div>
+          )}
+
+          {notice && (
+            <p className={`mt-3 text-xs ${notice.kind === 'err' ? 'text-red-600 dark:text-red-400' : 'text-blue-600 dark:text-blue-400'}`}>
+              {notice.text}
+            </p>
+          )}
+
+          <div className="mt-4 border-t border-slate-100 pt-3 dark:border-slate-800">
+            <div className="mb-1.5 text-xs font-medium text-slate-700 dark:text-slate-200">Log Proses</div>
+            <pre ref={logRef} className="max-h-40 overflow-auto rounded-lg bg-slate-50 p-2.5 font-mono text-[11px] leading-relaxed text-slate-600 dark:bg-slate-950 dark:text-slate-400">
+              {(status.log && status.log.length ? status.log : ['Belum ada log.']).join('\n')}
+            </pre>
+          </div>
+
+          <div className="mt-4 grid grid-cols-3 gap-3 border-t border-slate-100 pt-3 text-xs dark:border-slate-800">
+            <div><div className="text-[11px] text-slate-500 dark:text-slate-400">Postingan</div><div className="font-mono text-lg font-semibold tabular-nums">{nf(data.posts || 0)}</div></div>
+            <div><div className="text-[11px] text-slate-500 dark:text-slate-400">Balasan</div><div className="font-mono text-lg font-semibold tabular-nums">{nf(data.replies || 0)}</div></div>
+            <div><div className="text-[11px] text-slate-500 dark:text-slate-400">Diperbarui</div><div className="mt-1 text-[11px] text-slate-600 dark:text-slate-300">{data.updated_at ? formatDate(data.updated_at) : '—'}</div></div>
+          </div>
+        </section>
+
+        <section className="surface p-5">
+          <h2 className="text-sm font-semibold text-slate-900 dark:text-white">
+            Impor &amp; Cadangkan Dataset JSON
+          </h2>
+          <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+            Unduh <code className="font-mono">data.json</code> dan{' '}
+            <code className="font-mono">llm_analysis.json</code> per proyek. Impor tulis ke server tidak tersedia.
+          </p>
+
+          <div className="mt-4 flex flex-wrap gap-2.5">
+            <button
+              type="button"
+              onClick={() => fileRef.current?.click()}
+              className="btn-secondary"
+            >
+              <Upload className="h-3.5 w-3.5" /> Impor File JSON
+            </button>
+            <input
+              ref={fileRef}
+              type="file"
+              accept=".json"
+              hidden
+              onChange={onImportFile}
+            />
+            <button
+              type="button"
+              onClick={() => downloadDataset('data.json')}
+              className="btn-secondary"
+            >
+              <Download className="h-3.5 w-3.5" /> Unduh Dataset (data.json)
+            </button>
+            <button
+              type="button"
+              onClick={() => downloadDataset('llm_analysis.json')}
+              className="btn-secondary"
+            >
+              <Download className="h-3.5 w-3.5" /> Unduh Analisis (llm_analysis.json)
+            </button>
+          </div>
+        </section>
+      </div>
+
+      {/* Right: Workspace / Project Manager */}
+      <div className="space-y-5 xl:col-span-5">
+        <section className="surface p-5">
+          <h2 className="text-sm font-semibold text-slate-900 dark:text-white">
+            Manajemen Proyek Pemantauan
+          </h2>
+          <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+            Pisahkan ruang kerja berdasarkan kampanye atau isu agar graf SNA tidak tercampur
+          </p>
+
+          <form onSubmit={createProject} className="mt-4 space-y-2.5">
+            <input
+              type="text"
+              value={newName}
+              onChange={(e) => setNewName(e.target.value)}
+              placeholder="Nama proyek baru, mis. Evaluasi Layanan Publik"
+              className="input-field w-full"
+            />
+            <input
+              type="text"
+              value=""
+              readOnly
+              placeholder="Kata kunci pantauan (opsional, diatur saat scraping)"
+              className="input-field w-full"
+            />
+            <button
+              type="submit"
+              disabled={projBusy || !newName.trim()}
+              className="btn-primary w-full"
+            >
+              <Plus className="h-3.5 w-3.5" /> Buat Proyek Baru
+            </button>
+          </form>
+
+          {projMsg && (
+            <p className="mt-2 text-xs text-red-600 dark:text-red-400">{projMsg}</p>
+          )}
+
+          <div className="mt-5 divide-y divide-slate-100 border-t border-slate-100 dark:divide-slate-800 dark:border-slate-800">
+            {projects.map((p) => {
+              const active = p.slug === project;
+              return (
+                <div key={p.slug} className="flex items-center justify-between gap-2 py-3 text-xs">
+                  <div className="min-w-0">
+                    <div className="truncate font-medium text-slate-900 dark:text-white">
+                      {p.name}
+                    </div>
+                    <div className="mt-0.5 font-mono text-[11px] tabular-nums text-slate-500 dark:text-slate-400">
+                      {nf(p.posts || 0)} post · {p.has_data ? 'data tersedia' : 'kosong'}{p.has_analysis ? ' · berlabel' : ''}
+                    </div>
+                  </div>
+                  <div className="flex shrink-0 items-center gap-2">
+                    {active ? (
+                      <span className="font-medium text-blue-600 dark:text-blue-400">Aktif</span>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          try { localStorage.setItem('sna-project', p.slug); } catch {}
+                          if (typeof onProjectChange === 'function') onProjectChange(p.slug);
+                          else switchProject(p.slug);
+                        }}
+                        className="btn-secondary"
+                      >
+                        Buka
+                      </button>
+                    )}
+                    {projects.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={() => deleteProject(p.slug)}
+                        disabled={projBusy}
+                        className="rounded-md p-1.5 text-slate-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/40 dark:hover:text-red-400"
+                        title="Hapus proyek"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    )}
                   </div>
                 </div>
-                <div className="flex flex-wrap gap-2">
-                  <button className="btn-primary" disabled={busy || running || loggingIn} onClick={startScrape}>▶ Mulai scraping</button>
-                  {running && <button className="btn-secondary" disabled={busy} onClick={cancelScrape}>■ Hentikan</button>}
-                </div>
-              </div>
-            </CardBody>
-          </Card>
-
-          {(running || job.phase === 'done' || job.phase === 'error') && (
-            <Card>
-              <CardHeader title={PHASE[job.phase] || 'Proses'} description={job.total ? `${job.done || 0}/${job.total}` : ''} />
-              <CardBody>
-                <Bar value={progress} />
-                <p className="mt-2 text-xs text-slate-600 dark:text-slate-300">{job.message || ''}</p>
-                {job.error && job.phase === 'error' && <p className="mt-1 text-xs text-red-600 dark:text-red-300">{job.error}</p>}
-                {log.length > 0 && <pre ref={logRef} className="mt-3 max-h-52 overflow-auto rounded-xl bg-slate-900 p-3 text-[11px] leading-relaxed text-emerald-300 font-mono">{log.join('\n')}</pre>}
-              </CardBody>
-            </Card>
-          )}
-        </div>
-
-        <aside className="space-y-4">
-          <Card>
-            <CardHeader title="Manajemen Proyek Pemantauan" description="Kelola ruang kerja riset" />
-            <CardBody>
-              <div className="mb-3 flex flex-col gap-2 sm:flex-row">
-                <input className="input-field min-w-0 flex-1" placeholder="Nama proyek baru…" value={newName} onChange={(e) => setNewName(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') createProject(); }} />
-                <button className="btn-primary" disabled={projectBusy} onClick={createProject}>＋ Buat</button>
-              </div>
-              <ul className="divide-y divide-slate-100 rounded-xl border border-slate-200 dark:divide-slate-800 dark:border-slate-700">
-                {projects.map((p) => (
-                  <li key={p.slug} className={`flex items-center gap-2 px-3 py-2.5 text-xs ${p.slug === project ? 'bg-blue-50/70 dark:bg-blue-500/10' : ''}`}>
-                    <div className="min-w-0 flex-1">
-                      <div className="truncate font-medium text-slate-800 dark:text-slate-100">{p.name}</div>
-                      <div className="text-[10px] text-slate-400">{nf(p.posts || 0)} post · {p.slug}</div>
-                    </div>
-                    {p.slug === project ? <StatusPill tone="brand">aktif</StatusPill> : <button className="btn-secondary !px-2 !py-1" onClick={() => selectProject(p.slug)}>Buka</button>}
-                    <button className="btn-secondary !px-2 !py-1" onClick={() => renameProject(p.slug)}>Ubah</button>
-                    <button className="btn-secondary !px-2 !py-1" disabled={projects.length <= 1} onClick={() => deleteProject(p.slug)}>Hapus</button>
-                  </li>
-                ))}
-              </ul>
-            </CardBody>
-          </Card>
-
-          <Card>
-            <CardHeader title="Impor & Cadangkan Dataset JSON" description="Unduh data proyek untuk arsip / analisis eksternal" />
-            <CardBody className="space-y-3 text-xs">
-              <div className="space-y-1.5">
-                <div className="flex justify-between"><span className="text-slate-500 dark:text-slate-400">Postingan</span><span className="font-semibold tabular-nums text-slate-800 dark:text-white">{nf(info.posts ?? 0)}</span></div>
-                <div className="flex justify-between"><span className="text-slate-500 dark:text-slate-400">Ukuran data.json</span><span className="tabular-nums">{info.size ? `${(info.size / 1024).toFixed(0)} KB` : '-'}</span></div>
-                <div className="flex justify-between"><span className="text-slate-500 dark:text-slate-400">Diperbarui</span><span>{info.mtime ? formatDate(info.mtime * 1000) : '-'}</span></div>
-                <div className="flex justify-between"><span className="text-slate-500 dark:text-slate-400">Analisis LLM</span><span>{analysisInfo?.mtime ? formatDate(analysisInfo.mtime * 1000) : 'belum ada'}</span></div>
-              </div>
-              <div className="flex flex-wrap gap-2 pt-1">
-                <a className="btn-primary" href={dataHref} download={`data-${project}.json`}>Unduh data.json</a>
-                <a className="btn-secondary" href={llmHref} download={`llm_analysis-${project}.json`}>Unduh analisis AI</a>
-              </div>
-              <p className="text-[11px] leading-relaxed text-slate-500 dark:text-slate-400">Impor dataset JSON ke proyek berjalan di server lokal belum tersedia sebagai endpoint tulis; untuk memuat data lain gunakan “Muat data.json” di tab Peta Jaringan (sesi lokal browser) atau salin berkas ke <code>projects/{project}/</code> saat server dimatikan.</p>
-            </CardBody>
-          </Card>
-        </aside>
+              );
+            })}
+            {projects.length === 0 && (
+              <p className="py-3 text-xs text-slate-500 dark:text-slate-400">Belum ada proyek.</p>
+            )}
+          </div>
+        </section>
       </div>
     </div>
   );
-
-  if (embedded) return content;
-  return <Layout page="scrape" title="Sumber & Proyek" subtitle={`Proyek ${projectName}`}>{content}</Layout>;
 }

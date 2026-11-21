@@ -1,299 +1,597 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import Layout from '../components/Layout.jsx';
-import Card, { CardBody, CardHeader } from '../components/Card.jsx';
-import { BarChart, Donut, RankBars } from '../components/MiniCharts.jsx';
-import EmptyState from '../components/EmptyState.jsx';
-import StatusPill from '../components/StatusPill.jsx';
-import { api, cmp, download, getJson, highlight, num } from '../lib/utils.js';
+import React, { useEffect, useMemo, useState } from 'react';
+import { Sparkles, Download } from 'lucide-react';
+import { api, getJson } from '../lib/utils.js';
 import { currentProject as getProject, projectFile } from '../lib/project.js';
 import '../../viewer_core.js';
 
 const SNA = globalThis.SNA;
-const SENT_COLORS = { positif: '#16a34a', netral: '#94a3b8', negatif: '#dc2626' };
 const nf = (v) => Number(v || 0).toLocaleString('id-ID');
 
-function StatCard({ label, value, tone = 'slate', hint }) {
-  const tones = { slate: 'text-slate-900 dark:text-white', green: 'text-emerald-600 dark:text-emerald-300', red: 'text-red-600 dark:text-red-300', amber: 'text-amber-600 dark:text-amber-300', sky: 'text-sky-600 dark:text-sky-300' };
-  return (
-    <div className="surface p-4">
-      <div className="text-[11px] font-medium uppercase tracking-wider text-slate-500 dark:text-slate-400">{label}</div>
-      <div className={`mt-1 text-2xl font-semibold tabular-nums ${tones[tone]}`}>{nf(value)}</div>
-      {hint && <div className="mt-1 text-[11px] text-slate-400">{hint}</div>}
-    </div>
+function contentKey(author, postCode, text) {
+  if (SNA?.contentKey) return SNA.contentKey(author, postCode, text);
+  const raw = `${String(author || '').trim().toLowerCase()}|${String(postCode || '').trim()}|${String(text || '').trim().toLowerCase().replace(/\s+/g, ' ')}`;
+  let h = 0;
+  for (let i = 0; i < raw.length; i++) h = ((h << 5) - h + raw.charCodeAt(i)) | 0;
+  return String(h >>> 0);
+}
+
+function highlightKeywords(text, terms) {
+  const cleanTerms = (terms || []).filter((t) => t && t.length >= 3).slice(0, 12);
+  if (cleanTerms.length === 0) return text;
+  const escaped = cleanTerms.map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+  const re = new RegExp(`(${escaped.join('|')})`, 'gi');
+  const parts = String(text || '').split(re);
+  return parts.map((part, idx) =>
+    idx % 2 === 1 ? <mark key={idx}>{part}</mark> : <React.Fragment key={idx}>{part}</React.Fragment>,
   );
 }
 
-function Badge({ children, kind }) { return <span className={`badge-${kind || 'netral'}`}>{children}</span>; }
-
-function CommentItem({ e, topicLabel, keywords }) {
-  const sent = e.sentiment || 'netral';
-  const tox = num(e.toxicity);
-  const postUrl = /^https?:\/\//i.test(e.postUrl || '') ? e.postUrl : `https://www.threads.com/@${encodeURIComponent(e.postAuthor || e.author || '')}/post/${encodeURIComponent(e.postCode || '')}`;
-  const authorUrl = `https://www.threads.com/@${encodeURIComponent(e.author || '')}`;
-  const border = sent === 'positif' ? 'border-l-emerald-500' : sent === 'negatif' ? 'border-l-red-500' : 'border-l-slate-300 dark:border-l-slate-600';
-  return (
-    <article className={`surface border-l-4 p-4 ${border}`}>
-      <div className="mb-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
-        <a href={authorUrl} target="_blank" rel="noreferrer" className="font-semibold text-slate-800 hover:text-blue-600 dark:text-white">@{e.author || '-'}</a>
-        <span className="text-slate-400">komentar di</span>
-        <a href={postUrl} target="_blank" rel="noreferrer" className="font-medium text-blue-600 hover:underline">@{e.postAuthor || '-'}</a>
-        <span className="text-slate-400">· {e.timestamp || 'tanpa waktu'}</span>
-      </div>
-      <div className="mb-2 flex flex-wrap gap-1.5">
-        <Badge kind={sent}>{sent === 'positif' ? 'Positif' : sent === 'negatif' ? 'Negatif' : 'Netral'}</Badge>
-        {e.emotion && <Badge kind="emosi">{e.emotion}</Badge>}
-        <Badge kind="topik">{topicLabel(e.topic)}</Badge>
-        {tox >= 0.6 && <Badge kind="tox">toksisitas {tox.toFixed(2)}</Badge>}
-        {e.spam && <Badge kind="spam">spam</Badge>}
-      </div>
-      <p className="whitespace-pre-wrap break-words text-sm leading-relaxed text-slate-700 dark:text-slate-200" dangerouslySetInnerHTML={{ __html: highlight(e.text, keywords) }} />
-      {e.alasan && <p className="mt-2 text-[11px] italic text-slate-400">Alasan model: {e.alasan}</p>}
-    </article>
-  );
+function downloadText(filename, content, mime = 'text/csv;charset=utf-8') {
+  const blob = new Blob([content], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-export default function SentimentPage({ embedded = false, project: projectProp }) {
+export default function SentimentPage({ embedded = false, project: projectProp, onTab }) {
   const project = projectProp || getProject();
   const [posts, setPosts] = useState([]);
-  const [raw, setRaw] = useState(null);
-  const [entries, setEntries] = useState([]);
-  const [topics, setTopics] = useState([]);
-  const [meta, setMeta] = useState({ model: '-', generated_at: '-', counts: {} });
+  const [analysis, setAnalysis] = useState(null);
+  const [analyzing, setAnalyzing] = useState(false);
+
   const [q, setQ] = useState('');
-  const [sent, setSent] = useState('');
-  const [emo, setEmo] = useState('');
-  const [topic, setTopic] = useState('');
-  const [flag, setFlag] = useState('');
-  const [sort, setSort] = useState('baru');
-  const [shown, setShown] = useState(80);
-  const [warn, setWarn] = useState('');
-  const [status, setStatus] = useState(null);
-  const [limit, setLimit] = useState(0);
-  const dataInput = useRef(null);
-  const llmInput = useRef(null);
+  const [sentFilter, setSentFilter] = useState('');
+  const [emoFilter, setEmoFilter] = useState('');
+  const [topicFilter, setTopicFilter] = useState('');
+  const [flagFilter, setFlagFilter] = useState('');
+  const [sortBy, setSortBy] = useState('baru');
+  const [shown, setShown] = useState(60);
 
-  const buildEntries = useCallback((data, llm) => {
-    if (!llm?.comments) return [];
-    const seen = new Set(); const out = [];
-    (data || []).forEach((p) => {
-      const code = p.code || '';
-      (p.replies || []).forEach((r) => {
-        const key = SNA.contentKey(r.author, code, r.text);
-        const a = llm.comments[key];
-        if (!a || seen.has(key)) return;
-        seen.add(key);
-        out.push({ ...a, key, author: r.author || '', text: r.text || '', timestamp: r.timestamp || '', postCode: code, postAuthor: p.author || '', postUrl: p.url || '' });
-      });
-    });
-    return out;
-  }, []);
-
-  const applyLlm = useCallback((llm, data) => {
-    setRaw(llm);
-    setTopics(Array.isArray(llm?.topics) ? llm.topics : []);
-    setMeta({ model: llm?.model || '-', generated_at: llm?.generated_at || '-', counts: llm?.counts || {} });
-    setEntries(buildEntries(data, llm));
-    setWarn('');
-  }, [buildEntries]);
+  const [sandboxText, setSandboxText] = useState('');
+  const [sandboxBusy, setSandboxBusy] = useState(false);
+  const [sandboxError, setSandboxError] = useState('');
+  const [sandboxResult, setSandboxResult] = useState(null);
 
   useEffect(() => {
     let alive = true;
     (async () => {
-      const [d, l] = await Promise.all([getJson(projectFile('data.json', project)), getJson(projectFile('llm_analysis.json', project))]);
+      const [d, a] = await Promise.all([
+        getJson(projectFile('data.json', project)),
+        getJson(projectFile('llm_analysis.json', project)),
+      ]);
       if (!alive) return;
-      const ps = Array.isArray(d) ? d : (Array.isArray(d?.posts) ? d.posts : []);
-      setPosts(ps);
-      if (l?.comments) applyLlm(l, ps);
-      else setWarn(`Hasil analisis AI untuk proyek ${project} belum tersedia. Gunakan tombol "Analisis AI" di header.`);
-      const s = await api('/api/status?project=' + encodeURIComponent(project));
-      if (alive && s.ok && s.data?.running) setStatus(s.data);
+      const list = Array.isArray(d) ? d : (Array.isArray(d?.posts) ? d.posts : []);
+      setPosts(list);
+      setAnalysis(a && typeof a === 'object' && !Array.isArray(a) ? a : null);
     })();
     return () => { alive = false; };
-  }, [applyLlm, project]);
+  }, [project]);
 
   useEffect(() => {
-    if (!status?.running) return;
-    const id = setInterval(async () => {
-      const s = await api('/api/status?project=' + encodeURIComponent(project));
-      if (!s.ok) { setStatus(null); setWarn('Server analisis tidak merespons.'); return; }
-      if (s.data?.running) { setStatus(s.data); return; }
-      clearInterval(id);
-      setStatus(null);
-      const fresh = await getJson(projectFile('llm_analysis.json', project) + '?t=' + Date.now());
-      if (fresh?.comments) applyLlm(fresh, posts);
-      else if (s.data?.error) setWarn('Analisis gagal: ' + s.data.error);
-    }, 2000);
-    return () => clearInterval(id);
-  }, [status?.running, applyLlm, posts, project]);
+    let alive = true;
+    const tick = async () => {
+      const s = await api('/api/status?project=' + encodeURIComponent(project || 'default'));
+      if (!alive) return;
+      setAnalyzing(!!(s.ok && s.data?.running));
+    };
+    tick();
+    const id = setInterval(tick, 3000);
+    return () => { alive = false; clearInterval(id); };
+  }, [project]);
 
-  const topicLabel = useCallback((id) => { const t = topics.find((x) => x.id === Number(id)); return t ? (t.label || `Topik ${t.id}`) : `Topik ${id ?? '-'}`; }, [topics]);
+  const runBatchAnalyze = async () => {
+    if (analyzing) return;
+    const r = await api('/api/analyze', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ project: project || 'default' }),
+    });
+    if (r.ok || r.status === 409) setAnalyzing(true);
+  };
+
+  const entries = useMemo(() => {
+    const out = [];
+    const seen = new Set();
+    const map = analysis?.comments || {};
+    for (const p of posts) {
+      for (const r of (p.replies || [])) {
+        const key = contentKey(r.author, p.code, r.text);
+        if (seen.has(key)) continue;
+        seen.add(key);
+        const label = map[key];
+        out.push({
+          key,
+          author: r.author || '',
+          postAuthor: p.author || '',
+          postCode: p.code || '',
+          postUrl: p.url || '',
+          timestamp: r.timestamp || '',
+          platform: r.platform || p.platform || 'Threads',
+          text: r.text || '',
+          ...(label || {}),
+        });
+      }
+    }
+    return out;
+  }, [posts, analysis]);
+
+  const topics = useMemo(() => Array.isArray(analysis?.topics) ? analysis.topics : [], [analysis]);
+  const topicLabel = (id) => {
+    if (id == null || id === '') return 'Belum dikelompokkan';
+    const hit = topics.find((t) => String(t.id) === String(id));
+    return hit ? hit.label : `Topik #${id}`;
+  };
+
+  const emotions = useMemo(
+    () => [...new Set(entries.map((e) => e.emotion).filter(Boolean))].sort(),
+    [entries],
+  );
 
   const keywords = useMemo(() => {
-    const w = new Map();
-    entries.forEach((e) => { const t = topics.find((x) => x.id === e.topic); (t?.keywords || []).forEach((k) => { const s = String(k).trim().toLowerCase(); if (s) w.set(s, (w.get(s) || 0) + 1); }); });
-    return [...w.entries()].sort((a, b) => b[1] - a[1] || cmp(a[0], b[0])).slice(0, 30);
-  }, [entries, topics]);
+    const freq = new Map();
+    for (const t of topics) {
+      for (const kw of (t.keywords || [])) {
+        const clean = String(kw).trim().toLowerCase();
+        if (clean) freq.set(clean, (freq.get(clean) || 0) + (t.count || 1));
+      }
+    }
+    return [...freq.entries()].sort((a, b) => b[1] - a[1]).slice(0, 20);
+  }, [topics]);
 
   const filtered = useMemo(() => {
-    const needle = q.trim().toLowerCase();
-    let es = entries.filter((e) => {
-      if (sent && e.sentiment !== sent) return false;
-      if (emo && e.emotion !== emo) return false;
-      if (topic !== '' && Number(e.topic) !== Number(topic)) return false;
-      const tox = num(e.toxicity);
-      if (flag === 'tox' && tox < 0.6) return false;
-      if (flag === 'spam' && !e.spam) return false;
-      if (flag === 'review' && tox < 0.6 && !e.spam) return false;
-      if (needle && !SNA.normText(e.text).includes(needle) && !String(e.author || '').toLowerCase().includes(needle)) return false;
+    const term = q.trim().toLowerCase();
+    const list = entries.filter((e) => {
+      if (sentFilter === 'unlabeled' && e.sentiment) return false;
+      if (sentFilter && sentFilter !== 'unlabeled' && e.sentiment !== sentFilter) return false;
+      if (emoFilter && e.emotion !== emoFilter) return false;
+      if (topicFilter !== '' && String(e.topic) !== String(topicFilter)) return false;
+      if (flagFilter === 'tox' && Number(e.toxicity || 0) < 0.6) return false;
+      if (flagFilter === 'spam' && !e.spam) return false;
+      if (term) {
+        const hay = `${e.author} ${e.text} ${e.postAuthor}`.toLowerCase();
+        if (!hay.includes(term)) return false;
+      }
       return true;
     });
-    if (sort === 'tox') es = [...es].sort((a, b) => num(b.toxicity) - num(a.toxicity));
-    else if (sort === 'lama') es = [...es].sort((a, b) => cmp(String(a.timestamp), String(b.timestamp)));
-    else if (sort === 'akun') es = [...es].sort((a, b) => cmp(String(a.author), String(b.author)));
-    else es = [...es].sort((a, b) => cmp(String(b.timestamp), String(a.timestamp)));
-    return es;
-  }, [entries, q, sent, emo, topic, flag, sort]);
+
+    if (sortBy === 'tox') return [...list].sort((a, b) => Number(b.toxicity || 0) - Number(a.toxicity || 0));
+    if (sortBy === 'akun') return [...list].sort((a, b) => String(a.author).localeCompare(String(b.author)));
+    if (sortBy === 'lama') return [...list].sort((a, b) => String(a.timestamp).localeCompare(String(b.timestamp)));
+    return [...list].sort((a, b) => String(b.timestamp).localeCompare(String(a.timestamp)));
+  }, [entries, sentFilter, emoFilter, topicFilter, flagFilter, q, sortBy]);
 
   const stats = useMemo(() => {
-    const t = { positif: 0, negatif: 0, netral: 0, toxic: 0, spam: 0 };
-    filtered.forEach((e) => { t[e.sentiment] = (t[e.sentiment] || 0) + 1; if (num(e.toxicity) >= 0.6) t.toxic++; if (e.spam) t.spam++; });
+    const t = { positif: 0, netral: 0, negatif: 0, toxic: 0, spam: 0, unlabeled: 0 };
+    for (const e of filtered) {
+      if (!e.sentiment) { t.unlabeled += 1; continue; }
+      if (t[e.sentiment] != null) t[e.sentiment] += 1;
+      else t.netral += 1;
+      if (Number(e.toxicity || 0) >= 0.6) t.toxic += 1;
+      if (e.spam) t.spam += 1;
+    }
     return t;
   }, [filtered]);
 
-  const topicCounts = useMemo(() => {
-    const m = new Map(); filtered.forEach((e) => m.set(e.topic, (m.get(e.topic) || 0) + 1));
-    return [...m.entries()].sort((a, b) => b[1] - a[1]);
-  }, [filtered]);
+  const labeledCount = stats.positif + stats.netral + stats.negatif;
 
-  const sentimentDonut = useMemo(() => {
-    const rows = [
-      { label: 'positif', value: stats.positif, color: SENT_COLORS.positif },
-      { label: 'netral', value: stats.netral, color: SENT_COLORS.netral },
-      { label: 'negatif', value: stats.negatif, color: SENT_COLORS.negatif },
-    ];
-    return { rows, total: rows.reduce((a, r) => a + r.value, 0) };
-  }, [stats]);
-
-  const topicBars = useMemo(() => topicCounts.map(([id, n]) => ({ label: topicLabel(id), value: n })).slice(0, 6), [topicCounts, topicLabel]);
-  const emotions = useMemo(() => [...new Set(entries.map((e) => e.emotion).filter(Boolean))].sort(cmp), [entries]);
-  const resetFilters = () => { setQ(''); setSent(''); setEmo(''); setTopic(''); setFlag(''); setSort('baru'); setShown(80); };
-
-  const runAnalysis = async () => {
-    const r = await api('/api/analyze', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ project, limit: Math.max(0, Number(limit) || 0) }) });
-    if (!r.ok) { setWarn(r.status === 404 || r.status === 501 ? 'Server analisis tidak tersedia. Jalankan ./run.sh serve.' : (r.data?.message || 'Gagal memulai analisis.')); return; }
-    setWarn(''); const s = await api('/api/status?project=' + encodeURIComponent(project)); if (s.ok) setStatus(s.data);
+  const runSandbox = async (e) => {
+    e.preventDefault();
+    if (!sandboxText.trim()) return;
+    setSandboxBusy(true);
+    setSandboxError('');
+    setSandboxResult(null);
+    // Coba endpoint server jika tersedia; fallback: info tidak tersedia.
+    try {
+      const resp = await fetch('/api/analyze-text', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: sandboxText.trim(), project: project || 'default' }),
+      });
+      if (resp.ok) {
+        const data = await resp.json();
+        setSandboxResult(data);
+      } else {
+        setSandboxError('Fitur uji klasifikasi instan tidak tersedia di server ini. Gunakan Analisis Gemini batch untuk melabeli komentar.');
+      }
+    } catch {
+      setSandboxError('Fitur uji klasifikasi instan tidak tersedia di server ini. Gunakan Analisis Gemini batch untuk melabeli komentar.');
+    } finally {
+      setSandboxBusy(false);
+    }
   };
 
   const exportCsv = () => {
-    const cell = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
-    const head = ['sentimen', 'emosi', 'toksisitas', 'spam', 'topik', 'alasan', 'akun', 'kode_postingan', 'postingan', 'waktu', 'teks'];
-    const rows = filtered.map((e) => [e.sentiment, e.emotion, e.toxicity, e.spam ? 'ya' : '', topicLabel(e.topic), e.alasan, e.author, e.postCode, e.postAuthor, e.timestamp, e.text].map(cell).join(','));
-    download('sentimen.csv', [head.join(','), ...rows].join('\n'), 'text/csv;charset=utf-8');
+    const header = ['timestamp', 'author', 'post_author', 'post_code', 'platform', 'text', 'sentiment', 'emotion', 'topic', 'toxicity', 'spam', 'alasan'];
+    const esc = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+    const rows = filtered.map((f) => [
+      f.timestamp, f.author, f.postAuthor, f.postCode, f.platform, f.text,
+      f.sentiment || '', f.emotion || '', topicLabel(f.topic), Number(f.toxicity || 0).toFixed(2), f.spam ? 'true' : 'false', f.alasan || '',
+    ].map(esc).join(','));
+    downloadText(`${project || 'proyek'}-sentimen.csv`, [header.join(','), ...rows].join('\n'));
   };
 
-  const readFile = (input, cb) => {
-    const f = input.files?.[0]; if (!f) return;
-    const reader = new FileReader();
-    reader.onload = () => { try { cb(JSON.parse(String(reader.result).replace(/^\uFEFF/, ''))); } catch (err) { setWarn('File bukan JSON valid: ' + (err?.message || err)); } };
-    reader.readAsText(f); input.value = '';
+  const jumpToActor = (actorId) => {
+    if (typeof onTab === 'function') onTab('jaringan', actorId);
   };
 
-  const maxCloud = keywords[0]?.[1] || 1;
+  return (
+    <div className="space-y-5">
+      {/* Live Classifier Sandbox */}
+      <section className="surface p-5">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h2 className="text-sm font-semibold text-slate-900 dark:text-white">
+              Uji Klasifikasi Sentimen Real-Time (Gemini AI)
+            </h2>
+            <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+              Tempel komentar atau keluhan pelanggan untuk menguji deteksi sentimen, emosi, toksisitas, dan spam secara instan
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={runBatchAnalyze}
+            disabled={analyzing}
+            className="btn-primary"
+          >
+            <Sparkles className="h-3.5 w-3.5" />
+            {analyzing ? 'Memproses Batch...' : 'Analisis Komentar Belum Berlabel'}
+          </button>
+        </div>
 
-  const content = (
-    <div className="space-y-4">
-      {status?.running && (
-        <div className="surface p-3">
-          <div className="mb-2 text-xs text-slate-600 dark:text-slate-300">{status.message || 'Menganalisis'} {status.total ? `· batch ${status.done}/${status.total}` : ''}</div>
-          <div className="h-1.5 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700">
-            <div className="h-full bg-blue-600 transition-all" style={{ width: `${status.total ? Math.round(status.done / status.total * 100) : 0}%` }} />
+        <form onSubmit={runSandbox} className="flex flex-col gap-2.5 sm:flex-row">
+          <input
+            type="text"
+            value={sandboxText}
+            onChange={(e) => setSandboxText(e.target.value)}
+            placeholder="Contoh: Kereta terlambat 25 menit tapi pengumuman di peron sama sekali tidak jelas!"
+            className="input-field flex-1 py-2"
+          />
+          <button type="submit" disabled={sandboxBusy || !sandboxText.trim()} className="btn-secondary py-2">
+            {sandboxBusy ? 'Menganalisis...' : 'Klasifikasi Sekarang'}
+          </button>
+        </form>
+
+        {sandboxError && (
+          <p className="mt-2.5 text-xs text-red-600 dark:text-red-400">{sandboxError}</p>
+        )}
+
+        {sandboxResult && (
+          <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-slate-100 pt-3 text-xs dark:border-slate-800">
+            <span
+              className={`font-semibold capitalize ${
+                sandboxResult.sentiment === 'positif'
+                  ? 'text-emerald-600 dark:text-emerald-400'
+                  : sandboxResult.sentiment === 'negatif'
+                  ? 'text-red-600 dark:text-red-400'
+                  : 'text-slate-600 dark:text-slate-300'
+              }`}
+            >
+              Sentimen: {sandboxResult.sentiment || '-'}
+            </span>
+            <span className="text-slate-400">·</span>
+            <span className="text-slate-700 dark:text-slate-300">Emosi: {sandboxResult.emotion || '-'}</span>
+            <span className="text-slate-400">·</span>
+            <span className="text-slate-700 dark:text-slate-300">Topik: {sandboxResult.topicLabel || '-'}</span>
+            <span className="text-slate-400">·</span>
+            <span className="font-mono tabular-nums text-slate-700 dark:text-slate-300">
+              Toksisitas {Number(sandboxResult.toxicity || 0).toFixed(2)}
+            </span>
+            {sandboxResult.spam && (
+              <>
+                <span className="text-slate-400">·</span>
+                <span className="font-medium text-amber-600 dark:text-amber-400">Terindikasi Spam</span>
+              </>
+            )}
+            {sandboxResult.alasan && (
+              <p className="w-full text-[11px] text-slate-500 dark:text-slate-400">
+                Alasan model: {sandboxResult.alasan}
+              </p>
+            )}
+          </div>
+        )}
+      </section>
+
+      {/* Summary Strip */}
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+        <div className="surface p-3.5">
+          <div className="text-[11px] text-slate-500 dark:text-slate-400">Total Tampil</div>
+          <div className="mt-1 font-mono text-xl font-semibold tabular-nums">{nf(filtered.length)}</div>
+        </div>
+        <div className="surface p-3.5">
+          <div className="text-[11px] text-slate-500 dark:text-slate-400">Positif</div>
+          <div className="mt-1 font-mono text-xl font-semibold tabular-nums text-emerald-600 dark:text-emerald-400">
+            {nf(stats.positif)}
           </div>
         </div>
-      )}
-      {warn && <div className="rounded-lg bg-red-700 px-4 py-3 text-sm text-white">{warn}</div>}
-
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-6">
-        <StatCard label="Total Tampil" value={filtered.length} hint={`dari ${entries.length} berlabel`} />
-        <StatCard label="Positif" value={stats.positif} tone="green" />
-        <StatCard label="Netral" value={stats.netral} />
-        <StatCard label="Negatif" value={stats.negatif} tone="red" />
-        <StatCard label="Toksik ≥ 0,6" value={stats.toxic} tone="amber" />
-        <StatCard label="Spam" value={stats.spam} tone="amber" />
+        <div className="surface p-3.5">
+          <div className="text-[11px] text-slate-500 dark:text-slate-400">Netral</div>
+          <div className="mt-1 font-mono text-xl font-semibold tabular-nums text-slate-700 dark:text-slate-300">
+            {nf(stats.netral)}
+          </div>
+        </div>
+        <div className="surface p-3.5">
+          <div className="text-[11px] text-slate-500 dark:text-slate-400">Negatif</div>
+          <div className="mt-1 font-mono text-xl font-semibold tabular-nums text-red-600 dark:text-red-400">
+            {nf(stats.negatif)}
+          </div>
+        </div>
+        <div className="surface p-3.5">
+          <div className="text-[11px] text-slate-500 dark:text-slate-400">Toksik &ge; 0,6</div>
+          <div className="mt-1 font-mono text-xl font-semibold tabular-nums text-amber-600 dark:text-amber-400">
+            {nf(stats.toxic)}
+          </div>
+        </div>
+        <div className="surface p-3.5">
+          <div className="text-[11px] text-slate-500 dark:text-slate-400">Spam</div>
+          <div className="mt-1 font-mono text-xl font-semibold tabular-nums text-amber-600 dark:text-amber-400">
+            {nf(stats.spam)}
+          </div>
+        </div>
       </div>
 
-      <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
-        <div className="min-w-0 space-y-4">
+      {/* Main Split */}
+      <div className="grid grid-cols-1 gap-5 xl:grid-cols-12">
+        <div className="space-y-4 xl:col-span-8">
+          {/* Filter Bar */}
           <div className="surface flex flex-wrap items-center gap-2 p-3">
-            <input className="input-field min-w-[180px] flex-1" type="search" placeholder="Cari teks / akun…" value={q} onChange={(e) => { setQ(e.target.value); setShown(80); }} />
-            <select className="input-field" value={sent} onChange={(e) => { setSent(e.target.value); setShown(80); }}><option value="">Semua sentimen</option><option value="positif">Positif</option><option value="negatif">Negatif</option><option value="netral">Netral</option></select>
-            <select className="input-field" value={emo} onChange={(e) => { setEmo(e.target.value); setShown(80); }}><option value="">Semua emosi</option>{emotions.map((x) => <option key={x} value={x}>{x}</option>)}</select>
-            <select className="input-field" value={topic} onChange={(e) => { setTopic(e.target.value); setShown(80); }}><option value="">Semua topik</option>{topics.map((t) => <option key={t.id} value={t.id}>{t.label || `Topik ${t.id}`}</option>)}</select>
-            <select className="input-field" value={flag} onChange={(e) => { setFlag(e.target.value); setShown(80); }}><option value="">Semua komentar</option><option value="tox">Toksisitas ≥ 0,6</option><option value="spam">Spam saja</option><option value="review">Perlu ditinjau</option></select>
-            <select className="input-field" value={sort} onChange={(e) => setSort(e.target.value)}><option value="baru">Terbaru dulu</option><option value="lama">Terlama dulu</option><option value="tox">Toksisitas tertinggi</option><option value="akun">Akun (A–Z)</option></select>
-            <button className="btn-secondary" onClick={resetFilters}>Reset</button>
-            <button className="btn-secondary" onClick={exportCsv}>Ekspor CSV</button>
-            <div className="ml-auto flex items-center gap-2 text-xs text-slate-500">
-              <label className="hidden items-center gap-1 sm:flex" title="0 = semua">maks <input className="input-field w-16" type="number" min="0" value={limit} onChange={(e) => setLimit(e.target.value)} disabled={!!status?.running} /></label>
-              <button className="btn-primary" onClick={runAnalysis} disabled={!!status?.running}>▶ Analisis</button>
+            <input
+              type="search"
+              value={q}
+              onChange={(e) => { setQ(e.target.value); setShown(60); }}
+              placeholder="Cari teks komentar atau @akun..."
+              className="input-field min-w-[180px] flex-1"
+            />
+            <select
+              value={sentFilter}
+              onChange={(e) => { setSentFilter(e.target.value); setShown(60); }}
+              className="input-field"
+            >
+              <option value="">Semua Sentimen</option>
+              <option value="positif">Positif</option>
+              <option value="netral">Netral</option>
+              <option value="negatif">Negatif</option>
+              <option value="unlabeled">Belum Berlabel</option>
+            </select>
+            <select
+              value={emoFilter}
+              onChange={(e) => { setEmoFilter(e.target.value); setShown(60); }}
+              className="input-field"
+            >
+              <option value="">Semua Emosi</option>
+              {emotions.map((em) => (
+                <option key={em} value={em}>{em}</option>
+              ))}
+            </select>
+            <select
+              value={topicFilter}
+              onChange={(e) => { setTopicFilter(e.target.value); setShown(60); }}
+              className="input-field max-w-[180px]"
+            >
+              <option value="">Semua Topik</option>
+              {topics.map((t) => (
+                <option key={t.id} value={t.id}>{t.label}</option>
+              ))}
+            </select>
+            <select
+              value={flagFilter}
+              onChange={(e) => { setFlagFilter(e.target.value); setShown(60); }}
+              className="input-field"
+            >
+              <option value="">Semua Flag</option>
+              <option value="tox">Toksisitas &ge; 0,6</option>
+              <option value="spam">Spam saja</option>
+            </select>
+            <select
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value)}
+              className="input-field"
+            >
+              <option value="baru">Terbaru</option>
+              <option value="lama">Terlama</option>
+              <option value="tox">Toksisitas Tertinggi</option>
+              <option value="akun">Akun A–Z</option>
+            </select>
+            <button
+              type="button"
+              onClick={exportCsv}
+              className="btn-secondary"
+            >
+              <Download className="h-3.5 w-3.5" /> CSV
+            </button>
+          </div>
+
+          {/* Comment Stream List */}
+          <div className="surface divide-y divide-slate-100 dark:divide-slate-800">
+            {filtered.slice(0, shown).map((e) => {
+              const sentColor =
+                e.sentiment === 'positif'
+                  ? 'text-emerald-600 dark:text-emerald-400'
+                  : e.sentiment === 'negatif'
+                  ? 'text-red-600 dark:text-red-400'
+                  : 'text-slate-500 dark:text-slate-400';
+
+              return (
+                <article key={e.key} className="p-4 transition-colors hover:bg-slate-50/70 dark:hover:bg-slate-800/30">
+                  <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => jumpToActor(e.author.toLowerCase())}
+                        className="font-semibold text-slate-900 hover:text-blue-600 dark:text-white dark:hover:text-blue-400"
+                      >
+                        @{e.author}
+                      </button>
+                      <span className="text-slate-400">membalas</span>
+                      <button
+                        type="button"
+                        onClick={() => jumpToActor(e.postAuthor.toLowerCase())}
+                        className="font-medium text-blue-600 hover:underline dark:text-blue-400"
+                      >
+                        @{e.postAuthor}
+                      </button>
+                      <span className="text-slate-400">·</span>
+                      <span className="text-slate-500 dark:text-slate-400">{e.platform}</span>
+                    </div>
+                    <time className="font-mono text-[11px] tabular-nums text-slate-400">
+                      {e.timestamp ? new Date(e.timestamp).toLocaleString('id-ID') : '-'}
+                    </time>
+                  </div>
+
+                  <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px]">
+                    <span className={`font-semibold capitalize ${sentColor}`}>
+                      {e.sentiment || 'Belum dianalisis'}
+                    </span>
+                    {e.emotion && (
+                      <>
+                        <span className="text-slate-300 dark:text-slate-700">/</span>
+                        <span className="capitalize text-slate-600 dark:text-slate-300">{e.emotion}</span>
+                      </>
+                    )}
+                    {e.topic != null && e.topic !== '' && (
+                      <>
+                        <span className="text-slate-300 dark:text-slate-700">/</span>
+                        <span className="text-slate-600 dark:text-slate-300">Topik: {topicLabel(e.topic)}</span>
+                      </>
+                    )}
+                    {e.toxicity != null && Number(e.toxicity) >= 0.4 && (
+                      <>
+                        <span className="text-slate-300 dark:text-slate-700">/</span>
+                        <span className="font-mono tabular-nums text-amber-600 dark:text-amber-400">
+                          Toksisitas {Number(e.toxicity).toFixed(2)}
+                        </span>
+                      </>
+                    )}
+                    {e.spam && (
+                      <>
+                        <span className="text-slate-300 dark:text-slate-700">/</span>
+                        <span className="font-medium text-amber-600 dark:text-amber-400">Spam</span>
+                      </>
+                    )}
+                  </div>
+
+                  <p className="mt-2 whitespace-pre-wrap text-sm leading-relaxed text-slate-800 dark:text-slate-200">
+                    {highlightKeywords(e.text, keywords.map(([k]) => k))}
+                  </p>
+
+                  {e.alasan && (
+                    <p className="mt-1.5 text-[11px] text-slate-500 dark:text-slate-400">
+                      Alasan model: {e.alasan}
+                    </p>
+                  )}
+                </article>
+              );
+            })}
+
+            {filtered.length === 0 && (
+              <div className="p-8 text-center text-xs text-slate-500 dark:text-slate-400">
+                Tidak ada komentar yang cocok dengan filter saat ini.
+              </div>
+            )}
+          </div>
+
+          {filtered.length > shown && (
+            <button
+              type="button"
+              onClick={() => setShown((s) => s + 60)}
+              className="btn-secondary w-full py-2"
+            >
+              Tampilkan 60 komentar berikutnya ({nf(filtered.length - shown)} tersisa)
+            </button>
+          )}
+        </div>
+
+        {/* Right Breakdown Sidebar */}
+        <aside className="space-y-4 xl:col-span-4">
+          <div className="surface p-4">
+            <h3 className="text-sm font-semibold text-slate-900 dark:text-white">Proporsi Polaritas</h3>
+            <div className="mt-3 flex h-2 w-full overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800">
+              {labeledCount > 0 && (
+                <>
+                  <div
+                    className="bg-emerald-500"
+                    style={{ width: `${(stats.positif / labeledCount) * 100}%` }}
+                  />
+                  <div
+                    className="bg-slate-400"
+                    style={{ width: `${(stats.netral / labeledCount) * 100}%` }}
+                  />
+                  <div
+                    className="bg-red-500"
+                    style={{ width: `${(stats.negatif / labeledCount) * 100}%` }}
+                  />
+                </>
+              )}
+            </div>
+            <div className="mt-2 flex justify-between font-mono text-[11px] tabular-nums text-slate-500 dark:text-slate-400">
+              <span>Pos {labeledCount ? Math.round((stats.positif / labeledCount) * 100) : 0}%</span>
+              <span>Net {labeledCount ? Math.round((stats.netral / labeledCount) * 100) : 0}%</span>
+              <span>Neg {labeledCount ? Math.round((stats.negatif / labeledCount) * 100) : 0}%</span>
             </div>
           </div>
 
-          <div className="text-xs text-slate-500">Menampilkan {Math.min(shown, filtered.length)} dari {filtered.length} komentar · model {meta.model} · {meta.generated_at}</div>
-          <div className="space-y-3">
-            {filtered.slice(0, shown).map((e) => <CommentItem key={e.key} e={e} topicLabel={topicLabel} keywords={keywords.map(([k]) => k)} />)}
-            {!filtered.length && <div className="surface p-8 text-center text-sm text-slate-500">Tidak ada komentar yang cocok.</div>}
+          <div className="surface p-4">
+            <h3 className="mb-3 text-sm font-semibold text-slate-900 dark:text-white">
+              Klaster Topik ({topics.length})
+            </h3>
+            <div className="divide-y divide-slate-100 dark:divide-slate-800">
+              {topics.map((t) => (
+                <button
+                  key={t.id}
+                  type="button"
+                  onClick={() => setTopicFilter((cur) => (String(cur) === String(t.id) ? '' : String(t.id)))}
+                  className={`block w-full py-2.5 text-left transition-colors ${
+                    String(topicFilter) === String(t.id) ? 'text-blue-600 dark:text-blue-400' : ''
+                  }`}
+                >
+                  <div className="flex items-center justify-between text-xs font-medium">
+                    <span className="truncate">{t.label}</span>
+                    <span className="font-mono tabular-nums text-slate-500">{nf(t.count)}</span>
+                  </div>
+                  <p className="mt-0.5 truncate text-[11px] text-slate-500 dark:text-slate-400">
+                    {(t.keywords || []).join(' · ')}
+                  </p>
+                </button>
+              ))}
+              {topics.length === 0 && (
+                <p className="py-2 text-xs text-slate-500 dark:text-slate-400">
+                  Belum ada topik yang terekstrak.
+                </p>
+              )}
+            </div>
           </div>
-          {filtered.length > shown && <button className="btn-secondary w-full" onClick={() => setShown(shown + 80)}>Tampilkan lebih banyak</button>}
-        </div>
 
-        <aside className="space-y-4">
-          <Card>
-            <CardHeader title="Proporsi Polaritas" description={`${nf(sentimentDonut.total)} komentar tampil`} />
-            <CardBody>
-              {sentimentDonut.total ? (
-                <div className="flex flex-col items-center gap-3">
-                  <Donut segments={sentimentDonut.rows} centerValue={nf(sentimentDonut.total)} centerLabel="tampil" />
-                  <ul className="w-full space-y-1.5 text-xs">{sentimentDonut.rows.map(r => <li key={r.label} className="flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-full" style={{background:r.color}} /><span className="flex-1 capitalize text-slate-600 dark:text-slate-300">{r.label}</span><span className="tabular-nums font-medium">{nf(r.value)}</span></li>)}</ul>
-                </div>
-              ) : <EmptyState compact title="Belum ada data" />}
-            </CardBody>
-          </Card>
-          <Card>
-            <CardHeader title="Klaster Topik" description={`${nf(topics.length)} topik`} />
-            <CardBody>{topicBars.length ? <RankBars rows={topicBars} /> : <EmptyState compact title="Belum ada topik" description="Jalankan analisis AI." />}</CardBody>
-          </Card>
-          <Card>
-            <CardHeader title="Kata Kunci Menonjol" />
-            <CardBody>
-              <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
-                {keywords.map(([k, n]) => <span key={k} title={`${k} · ${n}`} style={{ fontSize: 11 + Math.round(13 * n / maxCloud) }} className="text-blue-700 dark:text-blue-300">{k}</span>)}
-                {!keywords.length && <span className="text-xs text-slate-400">Belum ada data.</span>}
-              </div>
-            </CardBody>
-          </Card>
-          <Card>
-            <CardHeader title="Info Dataset" />
-            <CardBody className="space-y-1.5 text-xs text-slate-500">
-              <div>Model: <b className="text-slate-700 dark:text-slate-200">{meta.model}</b></div>
-              <div>Dibuat: {meta.generated_at}</div>
-              <div>Postingan: {posts.length} · komentar: {meta.counts.comments || entries.length}</div>
-              <div className="flex flex-wrap gap-2 pt-2">
-                <button className="btn-secondary" onClick={() => dataInput.current?.click()}>Muat data.json</button>
-                <button className="btn-secondary" onClick={() => llmInput.current?.click()}>Muat hasil LLM</button>
-                <input ref={dataInput} type="file" accept=".json" hidden onChange={(e) => readFile(e.target, (d) => { const ps = Array.isArray(d) ? d : d?.posts || []; setPosts(ps); if (raw) applyLlm(raw, ps); })} />
-                <input ref={llmInput} type="file" accept=".json" hidden onChange={(e) => readFile(e.target, (d) => { if (!d?.comments) { setWarn('File itu bukan hasil analisis LLM.'); return; } applyLlm(d, posts); })} />
-              </div>
-            </CardBody>
-          </Card>
+          <div className="surface p-4">
+            <h3 className="mb-3 text-sm font-semibold text-slate-900 dark:text-white">
+              Kata Kunci Menonjol
+            </h3>
+            <div className="flex flex-wrap gap-2">
+              {keywords.map(([word, count]) => (
+                <button
+                  key={word}
+                  type="button"
+                  onClick={() => setQ((cur) => (cur === word ? '' : word))}
+                  className={`text-xs transition-colors hover:underline ${
+                    q === word
+                      ? 'font-semibold text-blue-600 dark:text-blue-400'
+                      : 'text-slate-700 dark:text-slate-300'
+                  }`}
+                >
+                  {word}{' '}
+                  <span className="font-mono text-[10px] tabular-nums text-slate-400">({count})</span>
+                </button>
+              ))}
+              {keywords.length === 0 && (
+                <p className="text-xs text-slate-500 dark:text-slate-400">Belum ada kata kunci.</p>
+              )}
+            </div>
+          </div>
         </aside>
       </div>
     </div>
-  );
-
-  if (embedded) return content;
-  return (
-    <Layout page="sentimen" title="Analisis Sentimen" subtitle={`Proyek ${project} · label sentimen, emosi, topik, dan toksisitas`} actions={<button className="btn-primary" onClick={runAnalysis} disabled={!!status?.running}>▶ Analisis AI</button>}>
-      {content}
-    </Layout>
   );
 }
