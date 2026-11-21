@@ -50,7 +50,7 @@ Hasil disimpan ke `projects/default/data.json` (per proyek) dan **digabung** den
 
 Jalankan `./run.sh serve` sekali, lalu buka **`http://localhost:8000/scrape.html`**. Halaman "Pengumpulan Data" di sidebar menyediakan alur lengkap:
 
-1. **Login** — tombol "Buka browser login" menyuruh server lokal membuka Chromium tampak. Login manual di jendela itu; deteksi cookie `.threads.com` berjalan otomatis. Tombol "Saya sudah login" hanya fallback. Sesi tersimpan di `threads_profile/` (gitignored) dan **tidak pernah dikirim ke browser**.
+1. **Login** — tombol "Buka browser login" menyuruh server lokal membuka Chromium tampak. Login manual di jendela itu; deteksi cookie `.threads.com` berjalan otomatis. Tombol "Saya sudah login" hanya fallback. Sesi tersimpan per profil di `threads_profiles/<id>/profile/` (gitignored, cookie/sesi sensitif) dan **tidak pernah dikirim ke browser**. Anda bisa membuat beberapa profil, memilih profil aktif, login, logout, atau menghapus profil dari kartu Sesi Threads.
 2. **Ambil data** — pilih proyek (atau buat baru di kartu "0 · Proyek"), lalu pilih profil / kata kunci / URL postingan, jumlah postingan, batas komentar, dan opsi **gabungkan atau timpa** data lama. Opsi timpa tetap membuat backup `data.json.bak` di folder proyek sebelum menulis.
 3. **Pantau progres** — jumlah postingan yang selesai, pesan, dan log ditampilkan langsung. Job berjalan di server, jadi halaman boleh ditutup dan dibuka lagi.
 4. **Pakai hasilnya** — tombol "Buka di peta jaringan" memuat `projects/<slug>/data.json` yang baru.

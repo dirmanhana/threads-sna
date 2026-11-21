@@ -35,11 +35,12 @@ from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlsplit
 
 import projects as project_store
+import threads_profiles
 
 ROOT = Path(__file__).resolve().parent
 DIST = ROOT / "dist"
 SCRAPER = ROOT / "scrape_threads.py"
-PROFILE_DIR = ROOT / "threads_profile"
+LEGACY_PROFILE_DIR = ROOT / "threads_profile"
 LOGIN_PROGRESS = ROOT / "login_progress.json"
 LOGIN_MARKER = ROOT / "login_selesai.marker"
 
@@ -51,7 +52,7 @@ API_TOKEN = secrets.token_urlsafe(32)
 SENSITIVE = (
     "/.env", "/llm_analysis.lock", "/llm_progress.json",
     "/scrape_progress.json", "/login_progress.json", "/login_selesai.marker",
-    "/threads_profile", "/failed.json", "/index.json",
+    "/threads_profile", "/threads_profiles", "/failed.json", "/index.json",
     "/data.json", "/llm_analysis.json", "/data.json.bak",
 )
 # File proyek yang boleh dibaca peramban (sisanya dianggap sensitif).
@@ -206,23 +207,8 @@ def read_json(path: Path, fallback):
         return fallback
 
 
-def session_active() -> bool:
-    """Cek cookie sesi Threads pada profil Playwright (tanpa membaca nilainya)."""
-    db = PROFILE_DIR / "Default" / "Cookies"
-    if not db.exists():
-        return False
-    try:
-        con = sqlite3.connect("file:%s?mode=ro" % db, uri=True, timeout=2)
-        try:
-            row = con.execute(
-                "select 1 from cookies where host_key like '%threads.com%' "
-                "and name in ('sessionid','ds_user_id') and length(encrypted_value)>0 limit 1"
-            ).fetchone()
-            return bool(row)
-        finally:
-            con.close()
-    except Exception:
-        return False
+def session_active(profile_id: str | None = None) -> bool:
+    return threads_profiles.session_active(profile_id)
 
 
 def data_info(slug: str = "default") -> dict:
@@ -250,11 +236,21 @@ def data_info(slug: str = "default") -> dict:
 def login_status_payload() -> dict:
     running = is_running(_login)
     prog = read_json(LOGIN_PROGRESS, {})
-    active = session_active()
+    prof = threads_profiles.active_profile()
+    active = session_active(prof["id"])
     message = prog.get("message") or ("Sesi login aktif." if active else "Belum ada sesi login.")
+    listing = threads_profiles.list_profiles()
+    profiles = []
+    for item in listing["profiles"]:
+        profiles.append({
+            **item,
+            "active_session": session_active(item["id"]),
+        })
     return {
         "running": running,
         "active": active,
+        "profile": prof,
+        "profiles": profiles,
         "phase": prog.get("phase") if running else ("done" if prog.get("success") else ""),
         "message": message,
         "error": _login["error"] or prog.get("error"),
@@ -433,6 +429,8 @@ class Handler(SimpleHTTPRequestHandler):
         if path == "/api/projects":
             return self.reply(200, {"projects": project_store.list_projects(),
                                     "default": "default"})
+        if path == "/api/threads/profiles":
+            return self.reply(200, threads_profiles.list_profiles())
         slug = self.query_project()
         if path in ("/api/status", "/api/result", "/api/scrape/status", "/api/data"):
             meta = self.project_or_error(slug)
@@ -502,6 +500,11 @@ class Handler(SimpleHTTPRequestHandler):
             "/api/login/start": self.post_login_start,
             "/api/login/confirm": self.post_login_confirm,
             "/api/login/cancel": self.post_login_cancel,
+            "/api/login/logout": self.post_login_logout,
+            "/api/threads/profiles": self.post_threads_profiles,
+            "/api/threads/profiles/select": self.post_threads_profile_select,
+            "/api/threads/profiles/rename": self.post_threads_profile_rename,
+            "/api/threads/profiles/delete": self.post_threads_profile_delete,
         }
         handler = routes.get(path)
         if handler is None:
@@ -609,11 +612,12 @@ class Handler(SimpleHTTPRequestHandler):
                 self.reply(409, {"started": False, "message":
                                  "Scraper sudah berjalan dalam proses lain (PID %d)." % ext})
                 return
+            profile = threads_profiles.active_profile()
             cmd = [sys.executable, str(SCRAPER), req["mode"], req["target"],
                    "--max-posts", str(req["maxPosts"]),
                    "--max-replies", str(req["maxReplies"]),
                    "--out", str(paths["data"]), "--failed", str(paths["failed"]),
-                   "--profile-dir", str(PROFILE_DIR),
+                   "--profile-dir", str(threads_profiles.profile_dir(profile["id"])),
                    "--web", "--progress-file", str(paths["progress"])]
             if not req["merge"]:
                 cmd.append("--replace")
@@ -641,8 +645,9 @@ class Handler(SimpleHTTPRequestHandler):
                 self.reply(409, {"started": False, "message":
                                  "Scraper/login sudah berjalan dalam proses lain (PID %d)." % ext})
                 return
+            profile = threads_profiles.active_profile()
             cmd = [sys.executable, str(SCRAPER), "web-login", "--web",
-                   "--profile-dir", str(PROFILE_DIR),
+                   "--profile-dir", str(threads_profiles.profile_dir(profile["id"])),
                    "--progress-file", str(LOGIN_PROGRESS),
                    "--login-marker", str(LOGIN_MARKER),
                    "--login-timeout", "300"]
@@ -663,6 +668,70 @@ class Handler(SimpleHTTPRequestHandler):
 
     def post_login_cancel(self):
         self.reply(200, {"stopped": kill_proc(_login)})
+
+    def post_login_logout(self):
+        with _browser_lock:
+            if is_running(_login) or is_running(_job):
+                self.reply(409, {"ok": False, "message": "Hentikan login/scraping yang sedang berjalan sebelum logout."})
+                return
+            try:
+                result = threads_profiles.logout_profile()
+            except Exception as exc:
+                self.reply(500, {"ok": False, "message": str(exc)})
+                return
+        self.reply(200, {"ok": True, "message": "Sesi profil Threads dihapus.", **result, "status": login_status_payload()})
+
+    def post_threads_profiles(self):
+        body = self.json_body()
+        name = str(body.get("name") or "").strip()
+        try:
+            profile = threads_profiles.create_profile(name)
+        except Exception as exc:
+            self.reply(400, {"ok": False, "message": str(exc)})
+            return
+        self.reply(200, {"ok": True, "profile": profile, **threads_profiles.list_profiles()})
+
+    def post_threads_profile_select(self):
+        body = self.json_body()
+        pid = str(body.get("id") or "").strip()
+        with _browser_lock:
+            if is_running(_login) or is_running(_job):
+                self.reply(409, {"ok": False, "message": "Hentikan login/scraping yang sedang berjalan sebelum ganti profil."})
+                return
+            try:
+                profile = threads_profiles.select_profile(pid)
+            except Exception as exc:
+                code = 404 if isinstance(exc, KeyError) else 400
+                self.reply(code, {"ok": False, "message": str(exc)})
+                return
+        self.reply(200, {"ok": True, "profile": profile, **threads_profiles.list_profiles(), "status": login_status_payload()})
+
+    def post_threads_profile_rename(self):
+        body = self.json_body()
+        pid = str(body.get("id") or "").strip()
+        name = str(body.get("name") or "").strip()
+        try:
+            profile = threads_profiles.rename_profile(pid, name)
+        except Exception as exc:
+            code = 404 if isinstance(exc, KeyError) else 400
+            self.reply(code, {"ok": False, "message": str(exc)})
+            return
+        self.reply(200, {"ok": True, "profile": profile, **threads_profiles.list_profiles()})
+
+    def post_threads_profile_delete(self):
+        body = self.json_body()
+        pid = str(body.get("id") or "").strip()
+        with _browser_lock:
+            if is_running(_login) or is_running(_job):
+                self.reply(409, {"ok": False, "message": "Hentikan login/scraping yang sedang berjalan sebelum hapus profil."})
+                return
+            try:
+                result = threads_profiles.delete_profile(pid)
+            except Exception as exc:
+                code = 404 if isinstance(exc, KeyError) else 400
+                self.reply(code, {"ok": False, "message": str(exc)})
+                return
+        self.reply(200, {"ok": True, **result, **threads_profiles.list_profiles(), "status": login_status_payload()})
 
     def reply(self, code: int, data) -> None:
         body = json.dumps(data, ensure_ascii=False).encode("utf-8")

@@ -45,9 +45,10 @@ export default function ScrapePage({ embedded = false, project: projectProp, onT
   const [merge, setMerge] = useState(true);
 
   const [status, setStatus] = useState({ running: false, phase: null, log: [] });
-  const [login, setLogin] = useState({ logged_in: false, running: false });
+  const [login, setLogin] = useState({ active: false, running: false, profiles: [], profile: null });
   const [notice, setNotice] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [newProfileName, setNewProfileName] = useState('');
   const logRef = useRef(null);
   const fileRef = useRef(null);
 
@@ -101,9 +102,13 @@ export default function ScrapePage({ embedded = false, project: projectProp, onT
     load();
   };
 
-  const loginAction = async (path) => {
+  const loginAction = async (path, body) => {
     setBusy(true);
-    const r = await api(path, { method: 'POST' });
+    const r = await api(path, {
+      method: 'POST',
+      headers: body ? { 'Content-Type': 'application/json' } : undefined,
+      body: body ? JSON.stringify(body) : undefined,
+    });
     setBusy(false);
     if (r.ok || r.status === 202) {
       setNotice({ kind: 'ok', text: r.data?.message || 'Perintah login dikirim.' });
@@ -111,6 +116,25 @@ export default function ScrapePage({ embedded = false, project: projectProp, onT
       setNotice({ kind: 'err', text: r.data?.message || 'Gagal memproses permintaan login.' });
     }
     load();
+  };
+
+  const createThreadProfile = async (e) => {
+    e.preventDefault();
+    if (!newProfileName.trim()) return;
+    setBusy(true);
+    const r = await api('/api/threads/profiles', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: newProfileName.trim() }),
+    });
+    setBusy(false);
+    if (r.ok) {
+      setNewProfileName('');
+      setNotice({ kind: 'ok', text: 'Profil Threads dibuat.' });
+      load();
+    } else {
+      setNotice({ kind: 'err', text: r.data?.message || 'Gagal membuat profil Threads.' });
+    }
   };
 
   const createProject = async (e) => {
@@ -216,14 +240,71 @@ export default function ScrapePage({ embedded = false, project: projectProp, onT
               </label>
 
               <label className="block text-xs">
-                <span className="text-slate-500 dark:text-slate-400">Status Sesi</span>
-                <div className="input-field mt-1 flex w-full items-center justify-between">
-                  <span className={login.logged_in ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-600 dark:text-slate-300'}>
-                    {login.logged_in ? 'Login aktif' : 'Belum login'}
-                  </span>
-                  <span className="font-mono text-[11px] text-slate-400">{login.running ? 'proses' : ''}</span>
-                </div>
+                <span className="text-slate-500 dark:text-slate-400">Profil Threads Aktif</span>
+                <select
+                  value={login.profile?.id || ''}
+                  onChange={(e) => loginAction('/api/threads/profiles/select', { id: e.target.value })}
+                  className="input-field mt-1 w-full"
+                  disabled={busy || status.running || login.running}
+                >
+                  {(login.profiles || []).map((p) => (
+                    <option key={p.id} value={p.id}>{p.name}{p.active_session ? ' (login)' : ''}</option>
+                  ))}
+                </select>
               </label>
+            </div>
+
+            <div className="rounded-lg border border-slate-200 bg-slate-50/60 p-3 dark:border-slate-800 dark:bg-slate-900/40">
+              <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                <div>
+                  <span className="font-medium text-slate-700 dark:text-slate-200">Sesi: {login.profile?.name || 'Profil'}</span>
+                  <span className={login.active ? 'ml-2 text-emerald-600 dark:text-emerald-400' : 'ml-2 text-slate-500 dark:text-slate-400'}>
+                    {login.active ? 'Login aktif' : 'Belum login'}
+                  </span>
+                  {login.running ? <span className="ml-2 font-mono text-[11px] text-slate-400">proses...</span> : null}
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <button type="button" onClick={() => loginAction('/api/login/start')} disabled={busy || status.running} className="btn-secondary">Buka Login</button>
+                  <button type="button" onClick={() => loginAction('/api/login/logout')} disabled={busy || status.running || login.running} className="btn-secondary">Logout</button>
+                  {login.running && (
+                    <>
+                      <button type="button" onClick={() => loginAction('/api/login/confirm')} disabled={busy} className="btn-secondary">Konfirmasi</button>
+                      <button type="button" onClick={() => loginAction('/api/login/cancel')} disabled={busy} className="btn-secondary">Batal</button>
+                    </>
+                  )}
+                </div>
+              </div>
+              <form onSubmit={createThreadProfile} className="mt-3 flex flex-wrap items-center gap-2">
+                <input
+                  type="text"
+                  value={newProfileName}
+                  onChange={(e) => setNewProfileName(e.target.value)}
+                  placeholder="Nama profil baru, mis. Akun Scraping"
+                  className="input-field min-w-[220px] flex-1"
+                />
+                <button type="submit" disabled={busy || !newProfileName.trim()} className="btn-secondary">Tambah Profil</button>
+              </form>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {(login.profiles || []).map((p) => (
+                  <div key={p.id} className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] dark:border-slate-700 dark:bg-slate-900">
+                    <span className={p.id === login.profile?.id ? 'font-medium text-blue-600 dark:text-blue-400' : 'text-slate-600 dark:text-slate-300'}>
+                      {p.name}{p.active_session ? ' • login' : ''}
+                    </span>
+                    {(login.profiles || []).length > 1 && (
+                      <button
+                        type="button"
+                        onClick={() => loginAction('/api/threads/profiles/delete', { id: p.id })}
+                        disabled={busy || status.running || login.running}
+                        className="text-slate-400 hover:text-red-600 disabled:opacity-40"
+                        title="Hapus profil"
+                      >×</button>
+                    )}
+                  </div>
+                ))}
+              </div>
+              <p className="mt-2 text-[11px] text-slate-500 dark:text-slate-400">
+                Profil aktif dipakai untuk scraping. Sesi disimpan lokal di <code>threads_profiles/</code> dan tidak dikirim ke browser.
+              </p>
             </div>
 
             <label className="block text-xs">
@@ -255,32 +336,18 @@ export default function ScrapePage({ embedded = false, project: projectProp, onT
               </label>
             </div>
 
-            <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
-              <div className="flex flex-wrap items-center gap-2">
-                <button type="button" onClick={() => loginAction('/api/login/start')} disabled={busy} className="btn-secondary">
-                  Buka Login Threads
-                </button>
-                {login.running && (
-                  <>
-                    <button type="button" onClick={() => loginAction('/api/login/confirm')} disabled={busy} className="btn-secondary">Konfirmasi Login</button>
-                    <button type="button" onClick={() => loginAction('/api/login/cancel')} disabled={busy} className="btn-secondary">Batal</button>
-                  </>
-                )}
-              </div>
-
-              <div className="flex items-center gap-2">
-                {status.running ? (
-                  <button type="button" onClick={cancelScrape} className="btn-secondary">Hentikan</button>
-                ) : null}
-                <button
-                  type="submit"
-                  disabled={busy || status.running || !target.trim()}
-                  className="btn-primary"
-                >
-                  <Plus className="h-3.5 w-3.5" />
-                  {status.running ? 'Mengambil...' : 'Kirim ke Aliran Data'}
-                </button>
-              </div>
+            <div className="flex flex-wrap items-center justify-end gap-2 pt-1">
+              {status.running ? (
+                <button type="button" onClick={cancelScrape} className="btn-secondary">Hentikan</button>
+              ) : null}
+              <button
+                type="submit"
+                disabled={busy || status.running || !target.trim()}
+                className="btn-primary"
+              >
+                <Plus className="h-3.5 w-3.5" />
+                {status.running ? 'Mengambil...' : 'Kirim ke Aliran Data'}
+              </button>
             </div>
           </form>
 
