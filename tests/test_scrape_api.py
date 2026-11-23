@@ -20,6 +20,21 @@ sys.path.insert(0, str(ROOT))
 import llm_server  # noqa: E402
 import projects as project_store  # noqa: E402
 import scrape_threads  # noqa: E402
+import threads_profiles  # noqa: E402
+
+
+def isolate_profiles(root):
+    """Arahkan penyimpanan profil ke folder sementara; kembalikan fungsi pemulih."""
+    old = {k: getattr(threads_profiles, k) for k in ("STORE", "LEGACY", "INDEX")}
+    threads_profiles.STORE = Path(root) / "threads_profiles"
+    threads_profiles.LEGACY = Path(root) / "threads_profile"
+    threads_profiles.INDEX = threads_profiles.STORE / "index.json"
+
+    def restore():
+        for key, value in old.items():
+            setattr(threads_profiles, key, value)
+
+    return restore
 
 STUB = r'''
 import argparse, json, sys, time
@@ -105,12 +120,11 @@ class HelperTest(unittest.TestCase):
 
     def test_sesi_tidak_aktif_tanpa_profil(self):
         with tempfile.TemporaryDirectory() as d:
-            old = llm_server.PROFILE_DIR
-            llm_server.PROFILE_DIR = Path(d)
+            restore = isolate_profiles(d)
             try:
                 self.assertFalse(llm_server.session_active())
             finally:
-                llm_server.PROFILE_DIR = old
+                restore()
 
 
 class ApiTest(unittest.TestCase):
@@ -130,9 +144,9 @@ class ApiTest(unittest.TestCase):
             "SCRAPER": llm_server.SCRAPER,
             "LOGIN_PROGRESS": llm_server.LOGIN_PROGRESS,
             "LOGIN_MARKER": llm_server.LOGIN_MARKER,
-            "PROFILE_DIR": llm_server.PROFILE_DIR,
             "external_pid": llm_server.external_pid,
         }
+        cls.restore_profiles = isolate_profiles(d)
         project_store.PROJECTS = cls.projects_dir
         project_store.TRASH = cls.projects_dir / ".trash"
         project_store.LEGACY_DATA = d / "data.json"
@@ -146,7 +160,6 @@ class ApiTest(unittest.TestCase):
         llm_server.SCRAPER = cls.stub
         llm_server.LOGIN_PROGRESS = d / "login_progress.json"
         llm_server.LOGIN_MARKER = d / "login_marker"
-        llm_server.PROFILE_DIR = d / "profil_kosong"
         cls.login_prog = llm_server.LOGIN_PROGRESS
         cls.marker = llm_server.LOGIN_MARKER
         handler = lambda *a, **kw: llm_server.Handler(*a, directory=str(ROOT), **kw)
@@ -163,6 +176,7 @@ class ApiTest(unittest.TestCase):
             target = project_store if k in ("PROJECTS", "LEGACY_DATA", "LEGACY_ANALYSIS",
                                             "LEGACY_FAILED", "TRASH") else llm_server
             setattr(target, k, v)
+        cls.restore_profiles()
         cls.tmp.cleanup()
 
     def get(self, path):

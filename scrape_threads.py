@@ -10,7 +10,7 @@ Pakai (lebih mudah lewat ./run.sh, lihat README):
     python scrape_threads.py keyword "kata kunci" --max-posts 15 # cari postingan berdasarkan kata kunci
     python scrape_threads.py post https://www.threads.com/@akun/post/XXXX
 
-Dipicu dari halaman web (/scrape.html): mode `web-login` membuka Chromium
+Dipicu dari halaman web (/scrape.html): mode `web-login` membuka Chrome/Chromium
 tanpa input(), dan flag --web/--progress-file/--replace dipakai llm_server.py.
 
 Hasil: data.json (hasil baru digabung dengan yang lama, kecuali --replace).
@@ -77,6 +77,10 @@ def apply_discovery_env():
     SCROLL_WAIT_MIN_MS = pick("SCRAPE_SCROLL_WAIT_MIN_MS", SCROLL_WAIT_MIN_MS)
     SCROLL_WAIT_MAX_MS = pick("SCRAPE_SCROLL_WAIT_MAX_MS", SCROLL_WAIT_MAX_MS)
 PROFILE_DIR = "./threads_profile"   # sesi login disimpan di sini
+# "chrome" memakai Google Chrome asli (fingerprint lebih normal untuk login).
+# Isi "none" untuk selalu memakai Chromium bawaan Playwright.
+BROWSER_CHANNEL = (os.environ.get("THREADS_BROWSER_CHANNEL")
+                   or load_env().get("THREADS_BROWSER_CHANNEL", "chrome")).strip()
 OUT = "data.json"
 FAILED = "failed.json"
 PROGRESS = "scrape_progress.json"
@@ -93,6 +97,31 @@ SESSION_COOKIES = ("sessionid", "ds_user_id")   # cookie=.threads.com hasil logi
 # mengumpulkannya dan menampilkannya di halaman "Pengumpulan Data".
 def log(*args):
     print(*args, file=sys.stderr, flush=True)
+
+
+def browser_channels():
+    """Urutan channel: Chrome asli dulu, lalu Chromium bawaan Playwright."""
+    name = BROWSER_CHANNEL.strip()
+    if not name or name.lower() in ("none", "chromium", "playwright"):
+        return [None]
+    return [name, None]
+
+
+def launch_context(p, profile_dir, headless):
+    """Buka profil persisten, utamakan Chrome asli, fallback ke Chromium Playwright."""
+    last = None
+    for channel in browser_channels():
+        opts = {"headless": headless, "locale": "id-ID"}
+        if channel:
+            opts["channel"] = channel
+        try:
+            return p.chromium.launch_persistent_context(profile_dir, **opts)
+        except Exception as exc:
+            last = exc
+            if channel:
+                log("! %s tidak bisa dipakai (%s); memakai Chromium bawaan Playwright."
+                    % (channel, exc))
+    raise last
 
 
 def write_progress(path, phase, done=0, total=0, message="", **extra):
@@ -715,8 +744,36 @@ def logged_in(ctx):
                for c in cookies)
 
 
+def goto_login(page, say):
+    """Buka halaman login sekali. Kembalikan respons, atau None bila ditolak.
+
+    Threads kadang membalas HTTP 429 dengan body kosong; Chromium melaporkannya
+    sebagai ERR_HTTP_RESPONSE_CODE_FAILURE. Jangan retry beruntun—itu justru
+    memperpanjang cooldown.
+    """
+    try:
+        resp = page.goto(BASE + "/login", wait_until="domcontentloaded", timeout=60000)
+    except Exception as exc:
+        msg = str(exc)
+        if "429" in msg or "ERR_HTTP_RESPONSE_CODE_FAILURE" in msg:
+            say("! Threads menolak koneksi (HTTP 429 / rate limit). Tunggu 30–60 menit "
+                "lalu coba lagi; jangan login berulang.")
+        else:
+            say("! gagal membuka halaman login:", exc)
+        return None
+    status = getattr(resp, "status", 0) or 0
+    if status >= 400:
+        if status == 429:
+            say("! Threads membalas HTTP 429 (rate limit). Tunggu 30–60 menit "
+                "lalu coba lagi; jangan login berulang.")
+        else:
+            say("! halaman login membalas HTTP %s." % status)
+        return None
+    return resp
+
+
 def web_login(profile_dir, marker, progress_file, timeout):
-    """Login interaktif untuk dipicu dari web: buka Chromium tampak, tunggu cookie sesi.
+    """Login interaktif untuk dipicu dari web: buka browser tampak, tunggu cookie sesi.
 
     Tidak memakai input() seperti mode `login` CLI. Selesai bila cookie sesi
     Threads muncul ATAU berkas marker dibuat tombol "Saya sudah login" di UI.
@@ -731,18 +788,21 @@ def web_login(profile_dir, marker, progress_file, timeout):
     ok, note = False, ""
     with sync_playwright() as p:
         try:
-            ctx = p.chromium.launch_persistent_context(profile_dir, headless=False, locale="id-ID")
+            ctx = launch_context(p, profile_dir, headless=False)
         except Exception as exc:                      # mis. tidak ada DISPLAY di server headless
             note = "Gagal membuka browser: %s" % exc
             log("!", note)
             write_progress(progress_file, "error", message=note, error=note)
             return 2
         page = ctx.pages[0] if ctx.pages else ctx.new_page()
-        try:
-            page.goto(BASE + "/login", wait_until="domcontentloaded")
-        except Exception as exc:
-            log("! gagal membuka halaman login:", exc)
-        write_progress(progress_file, "login", message="Silakan login di jendela Chromium yang terbuka.")
+        if goto_login(page, log) is None:
+            note = ("Halaman login Threads gagal dibuka. Lihat log; jika 429, "
+                    "tunggu cooldown lalu coba lagi.")
+            write_progress(progress_file, "error", message=note, error=note, success=False)
+            ctx.close()
+            log("!", note)
+            return 2
+        write_progress(progress_file, "login", message="Silakan login di jendela browser yang terbuka.")
         deadline = time.time() + max(30, int(timeout))
         while time.time() < deadline:
             try:
@@ -840,8 +900,8 @@ def main():
 
     with sync_playwright() as p:
         try:
-            ctx = p.chromium.launch_persistent_context(
-                a.profile_dir, headless=not (a.show or a.mode == "login"), locale="id-ID")
+            ctx = launch_context(p, a.profile_dir,
+                                 headless=not (a.show or a.mode == "login"))
         except Exception as exc:
             say("! gagal membuka browser:", exc)
             write_progress(prog, "error", message="Gagal membuka browser: %s" % exc,
@@ -852,7 +912,9 @@ def main():
         collector.attach(page)
 
         if a.mode == "login":
-            page.goto(f"{BASE}/login")
+            if goto_login(page, say) is None:
+                ctx.close()
+                return 2
             input("Login dulu di browser, lalu tekan Enter di sini... ")
             ctx.close()
             return
