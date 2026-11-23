@@ -1,1 +1,9 @@
 playwright>=1.44
+
+# Opsional: hanya untuk engine sentimen lokal (--engine indobert).
+# Untuk GPU, pasang torch dari index CUDA, bukan dari PyPI biasa:
+#   pip install --index-url https://download.pytorch.org/whl/cu130 torch
+#   pip install transformers sentencepiece
+# Build "+cpu" dari PyPI tidak akan melihat kartu grafis.
+# transformers
+# sentencepiece

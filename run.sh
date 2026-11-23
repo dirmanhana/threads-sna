@@ -8,6 +8,7 @@
 #   ./run.sh serve [port]                           # ringkasan + viewer + sentimen + pengumpulan data
 #   ./run.sh migrate                                # migrasi data.json lama ke schema baru
 #   ./run.sh analyze [opsi]                         # analisis konten via LLM (.env -> llm_analysis.json)
+#   ./run.sh analyze --engine indobert              # sentimen lokal tanpa API (butuh torch+transformers)
 #   ./run.sh test                                   # jalankan unit test
 # Variabel lingkungan: OUT=..., DELAY=..., PROFILE_DIR=...
 set -euo pipefail

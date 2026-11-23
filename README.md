@@ -12,13 +12,44 @@ Satu perintah ini menyiapkan **semua tahapan**:
 
 1. Cek prasyarat: Python 3, **Node.js 20+**, dan npm.
 2. Buat `.venv` lalu install paket dari `requirements.txt` (Playwright).
-3. Install browser Chromium untuk Playwright.
-4. Install dependensi Node (`npm ci` bila `package-lock.json` ada, sebaliknya `npm install`).
-5. Build dashboard React + Tailwind ke `dist/` (`npm run build`).
-6. Buat `.env` dari `.env.example` bila belum ada (tidak pernah menimpa kredensial yang sudah diisi).
-7. Verifikasi dengan unit test Python + Node.
+3. **Tanya apakah ingin memasang IndoBERT** (engine sentimen lokal, opsional).
+4. Install browser Chromium untuk Playwright.
+5. Install dependensi Node (`npm ci` bila `package-lock.json` ada, sebaliknya `npm install`).
+6. Build dashboard React + Tailwind ke `dist/` (`npm run build`).
+7. Buat `.env` dari `.env.example` bila belum ada (tidak pernah menimpa kredensial yang sudah diisi).
+8. Verifikasi dengan unit test Python + Node.
 
 Opsi environment: `WITH_DEPS=1` (library sistem Chromium, butuh sudo di Linux), `SKIP_BROWSER=1`, `SKIP_BUILD=1`, `SKIP_TESTS=1`, dan `PYTHON=python3.12` untuk memilih interpreter.
+
+### Pilihan IndoBERT saat instalasi
+
+Di langkah 3, `install.sh` menanyakan apakah Anda ingin memasang engine sentimen lokal:
+
+```
+==> [3/8] Engine sentimen lokal IndoBERT (opsional)
+    IndoBERT melabeli sentimen sepenuhnya offline (tanpa API LLM),
+    tapi hanya 3 kelas: positif/negatif/netral. ...
+    Ukuran unduhan: ~2,5 GB (torch) + ~500 MB (bobot model).
+    Pasang IndoBERT sekarang? [y/N]
+```
+
+Jawaban kosong berarti **tidak** (default aman, karena unduhannya besar). Bila dipilih `y`, skrip akan:
+
+1. Mendeteksi GPU lewat `nvidia-smi` dan memilih index wheel CUDA yang cocok dengan driver (mis. CUDA 13.4 → `cu130`, CUDA 12.4 → `cu124`). Tanpa GPU, dipakai build CPU.
+2. Memasang `torch` dari index yang sesuai, lalu `transformers` dan `sentencepiece`.
+3. Memverifikasi bahwa torch benar-benar melihat GPU, dan memberi peringatan bila tidak.
+4. Menulis `SENTIMENT_ENGINE=indobert` dan `INDOBERT_DEVICE=<cuda|cpu>` ke `.env` tanpa mengubah kunci lain.
+
+Instalasi non-interaktif (CI, `curl | bash`) otomatis melewati langkah ini. Untuk mengatur tanpa tanya:
+
+```bash
+WITH_INDOBERT=1 ./install.sh                 # pasang, deteksi device otomatis
+WITH_INDOBERT=0 ./install.sh                 # lewati
+WITH_INDOBERT=1 INDOBERT_DEVICE=cpu ./install.sh      # paksa CPU
+WITH_INDOBERT=1 TORCH_CUDA_INDEX=cu128 ./install.sh   # paksa index CUDA
+```
+
+Memilih `n` tidak mengunci apa pun: perintah pemasangan manualnya dicetak di akhir, dan bisa dijalankan kapan saja.
 
 Kalau ingin install manual per bagian: `python -m venv .venv && pip install -r requirements.txt && playwright install chromium`, lalu `npm install && npm run build`. `./run.sh serve` juga otomatis build bila `dist/` belum ada.
 
@@ -44,18 +75,20 @@ Untuk fitur analisis konten berbasis LLM, salin `.env.example` menjadi `.env` la
 
 Opsi lanjutan lewat `scrape_threads.py` langsung: `--out`, `--delay` (jeda dasar antar postingan, detik), `--max-replies`, `--profile-dir`, `--show`. Lewat `run.sh` bisa diatur dengan env: `OUT=nama.json DELAY=5 PROFILE_DIR=./akun_lain ./run.sh keyword "umkm"`.
 
+Browser memakai **Google Chrome asli** bila terpasang (`THREADS_BROWSER_CHANNEL=chrome`, default) agar fingerprint login lebih normal, lalu otomatis fallback ke Chromium bawaan Playwright. Set `THREADS_BROWSER_CHANNEL=none` untuk selalu memakai Chromium.
+
 Hasil disimpan ke `projects/default/data.json` (per proyek) dan **digabung** dengan data lama (berdasarkan kode postingan). Saat opsi gabung aktif, komentar yang sudah ada tidak dibuang walaupun tidak terlihat lagi pada scrape baru; item seperti itu hanya ditandai `still_present: false` bila scrape baru benar-benar lengkap. URL yang gagal dicatat ke `failed.json`. Jika semua postingan gagal dibaca, file hasil tidak ditimpa dan akan muncul peringatan kemungkinan sesi login kedaluwarsa.
 
 ### Pengumpulan data dari browser (tanpa terminal)
 
 Jalankan `./run.sh serve` sekali, lalu buka **`http://localhost:8000/scrape.html`**. Halaman "Pengumpulan Data" di sidebar menyediakan alur lengkap:
 
-1. **Login** — tombol "Buka browser login" menyuruh server lokal membuka Chromium tampak. Login manual di jendela itu; deteksi cookie `.threads.com` berjalan otomatis. Tombol "Saya sudah login" hanya fallback. Sesi tersimpan per profil di `threads_profiles/<id>/profile/` (gitignored, cookie/sesi sensitif) dan **tidak pernah dikirim ke browser**. Anda bisa membuat beberapa profil, memilih profil aktif, login, logout, atau menghapus profil dari kartu Sesi Threads.
+1. **Login** — tombol "Buka browser login" menyuruh server lokal membuka Chrome/Chromium tampak. Login manual di jendela itu; deteksi cookie `.threads.com` berjalan otomatis. Tombol "Saya sudah login" hanya fallback. Sesi tersimpan per profil di `threads_profiles/<id>/profile/` (gitignored, cookie/sesi sensitif) dan **tidak pernah dikirim ke browser**. Anda bisa membuat beberapa profil, memilih profil aktif, login, logout, atau menghapus profil dari kartu Sesi Threads.
 2. **Ambil data** — pilih proyek (atau buat baru di kartu "0 · Proyek"), lalu pilih profil / kata kunci / URL postingan, jumlah postingan, batas komentar, dan opsi **gabungkan atau timpa** data lama. Opsi timpa tetap membuat backup `data.json.bak` di folder proyek sebelum menulis.
 3. **Pantau progres** — jumlah postingan yang selesai, pesan, dan log ditampilkan langsung. Job berjalan di server, jadi halaman boleh ditutup dan dibuka lagi.
 4. **Pakai hasilnya** — tombol "Buka di peta jaringan" memuat `projects/<slug>/data.json` yang baru.
 
-Catatan: scraper tetap memakai Playwright sungguhan, jadi **login pertama memerlukan desktop dengan tampilan Chromium**. Di server headless murni, lakukan `./run.sh login` sekali lewat terminal. Endpoint hanya di-bind ke `127.0.0.1` — jangan diubah ke `0.0.0.0` karena itu akan memungkinkan pihak lain memicu browser dengan sesi Anda.
+Catatan: scraper tetap memakai Playwright sungguhan, jadi **login pertama memerlukan desktop dengan tampilan browser**. Di server headless murni, lakukan `./run.sh login` sekali lewat terminal. Endpoint hanya di-bind ke `127.0.0.1` — jangan diubah ke `0.0.0.0` karena itu akan memungkinkan pihak lain memicu browser dengan sesi Anda.
 
 API yang dipakai halaman ini: `GET /api/scrape/status`, `POST /api/scrape/start`, `/api/scrape/cancel`, `GET /api/login/status`, `POST /api/login/start`, `/api/login/confirm`, `/api/login/cancel`, `GET /api/projects`, `POST /api/projects`, `/api/projects/rename`, `/api/projects/delete`. `scrape_progress.json`, `login_progress.json`, dan `login_selesai.marker` adalah file sementara (gitignored) dan diblokir dari akses statis. Semua endpoint penerima parameter `?project=<slug>` (atau field `project` di body) berjalan untuk proyek yang dipilih; proyek `default` dipakai bila tidak disebutkan.
 
@@ -181,6 +214,30 @@ cp .env.example .env          # lalu isi LLM_API_KEY (dan base URL/model bila pe
 - Kunci tiap komentar memakai FNV-1a 64-bit yang identik di Python (`content_key`) dan browser (`SNA.contentKey`), jadi hasil LLM bisa dicocokkan dengan komentar di `data.json` secara sinkron tanpa menyimpan teks mentah di hasil analisis.
 - Topik dibuat sekali dari sampel teks terpanjang, lalu tiap batch komentar diberi label `sentiment` (positif/negatif/netral), `emotion`, `toxicity` (0–1), `spam`, dan `topic` dalam satu panggilan.
 
+### Mode lokal tanpa API: IndoBERTweet
+
+Kalau tidak mau memakai API LLM, sentimen bisa dilabeli sepenuhnya offline dengan model IndoBERTweet (`Aardiiiiy/indobertweet-base-Indonesian-sentiment-analysis`). Tidak ada panggilan jaringan dan tidak perlu `LLM_API_KEY`.
+
+```bash
+.venv/bin/pip install torch transformers sentencepiece   # sekali saja; untuk GPU pakai build CUDA (lihat di bawah)
+./run.sh analyze --engine indobert                       # atau: SENTIMENT_ENGINE=indobert di .env
+.venv/bin/python llm_analyze.py --engine indobert --limit 20 --dry-run
+```
+
+Batasan yang perlu diketahui sebelum memilih mode ini:
+
+- **Hanya label sentimen.** Model ini 3 kelas (`Negative`/`Neutral`/`Positive`), jadi hanya field `sentiment` yang terisi. `emotion`, `toxicity`, `spam`, dan `topic` ditulis kosong — bukan ditebak — sehingga filter emosi/toksisitas di halaman sentimen tidak akan menemukan apa pun. Kolom `confidence` ditambahkan berisi probabilitas kelas terpilih.
+- **Tanpa topik otomatis.** Pembuatan topik dan kata kunci tetap butuh LLM; di mode ini daftar topik kosong dan kata kunci tidak dihasilkan.
+- **Domain berbeda.** Model dilatih pada tweet berbahasa Indonesia (politik, bencana, pendidikan), bukan Threads. Sarkasme, singkatan baru, dan campur kode Inggris masih jadi titik lemah; perlakukan hasilnya sebagai triase kasar.
+- **GPU dipakai otomatis.** Device dipilih sendiri: `cuda` bila tersedia, `cpu` bila tidak. Paksa dengan `--device cuda:0` atau `--device cpu`, atau set `INDOBERT_DEVICE` di `.env`. Untuk GPU, torch harus build CUDA — build `+cpu` tidak akan melihat kartu grafis:
+  ```bash
+  .venv/bin/pip install --index-url https://download.pytorch.org/whl/cu130 torch
+  ```
+  Bobot model (~500 MB) diunduh sekali ke cache Hugging Face lalu dipakai offline.
+- Hasil tetap ditulis ke `llm_analysis.json` dengan `model` berisi nama model IndoBERT, jadi asal label tetap bisa diaudit dan dibedakan dari hasil LLM.
+
+Kedua mode bisa dipakai bergantian pada proyek yang sama; menjalankan ulang akan menimpa `llm_analysis.json` proyek tersebut.
+
 ### Halaman sentimen (terpisah dari viewer)
 
 Buka `http://localhost:8000/sentimen.html` setelah menjalankan `./run.sh serve`. Halaman ini **tidak dijadikan satu dengan viewer** dan menampilkan:
@@ -197,6 +254,7 @@ Buka `http://localhost:8000/sentimen.html` setelah menjalankan `./run.sh serve`.
 - Banner **"Gagal memuat data.json (Failed to fetch)"** → halaman dibuka langsung dengan `file://`. Browser memblokir `fetch` lokal; jalankan `./run.sh serve` lalu buka `http://localhost:8000/viewer.html` atau `http://localhost:8000/sentimen.html`. Di halaman sentimen, berkas juga bisa dimuat manual lewat tombol di header.
 - Banner **"File JSON tidak valid"** → file yang dipilih benar-benar bukan JSON. Pilih `data.json` yang dihasilkan scraper (bukan `data.json.bak`), atau cek cepat dengan `node -e "JSON.parse(require('fs').readFileSync('data.json','utf8'))"`.
 - Banner **"data.json terbaca, tetapi gagal dirender: …"** → JSON valid tapi ada error saat menggambar graf (mis. selector/field berubah). Pesan ini sengaja dibedakan dari error JSON agar mudah didiagnosis.
+- **`ERR_HTTP_RESPONSE_CODE_FAILURE` atau HTTP 429 saat login** → Threads/Meta sedang membatasi IP Anda (body respons kosong). Program sekarang menampilkan pesan yang jelas, bukan traceback. Cek `curl -s -o /dev/null -w '%{http_code}\n' https://www.threads.com/login`; jika `429`, tunggu 30–60 menit, jangan login berulang-ulang. Jika tetap 429, ganti jaringan (tethering HP/ISP lain). Captcha yang gagal berulang juga dipengaruhi reputasi IP dan fingerprint browser, bukan hanya jawaban gambar.
 
 ## Catatan
 

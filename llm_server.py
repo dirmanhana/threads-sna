@@ -72,17 +72,47 @@ def is_running(state: dict) -> bool:
 
 
 def external_pid(name: str, own: tuple[int, ...] = ()) -> int | None:
-    """PID proses script di luar server ini (mis. dijalankan manual lewat terminal)."""
+    """PID proses script di luar server ini (mis. dijalankan manual lewat terminal).
+
+    pgrep -f mencocokkan seluruh command line, jadi shell yang kebetulan
+    menyebut nama script (mis. `bash -c "... llm_analyze.py ..."`) ikut
+    tertangkap dan membuat analisis tampak "sudah berjalan". Karena itu
+    setiap kandidat diverifikasi: interpreter Python dan argumen pertama
+    benar-benar skrip yang dimaksud.
+    """
     try:
         pattern = "[%s]%s" % (name[0], name[1:])
         out = subprocess.run(["pgrep", "-f", pattern],
                              capture_output=True, text=True, timeout=3)
         for pid in (int(x) for x in out.stdout.split() if x.isdigit()):
-            if pid not in own:
-                return pid
+            if pid in own or pid == os.getpid():
+                continue
+            if not _is_script_process(pid, name):
+                continue
+            return pid
     except Exception:
         pass
     return None
+
+
+def _is_script_process(pid: int, name: str) -> bool:
+    """True bila pid benar-benar menjalankan skrip `name` dengan Python."""
+    try:
+        raw = Path("/proc/%d/cmdline" % pid).read_bytes()
+    except Exception:
+        return False
+    args = [a.decode("utf-8", "replace") for a in raw.split(b"\0") if a]
+    if len(args) < 2:
+        return False
+    exe = Path(args[0]).name.lower()
+    if not exe.startswith("python"):
+        return False
+    # Argumen pertama yang bukan opsi harus berakhir dengan nama skrip.
+    for arg in args[1:]:
+        if arg.startswith("-"):
+            continue
+        return Path(arg).name == name
+    return False
 
 
 def kill_proc(state: dict) -> bool:
@@ -555,6 +585,11 @@ class Handler(SimpleHTTPRequestHandler):
         limit = max(0, int(body.get("limit") or 0))
         batch = max(0, int(body.get("batchSize") or 0))
         timeout = max(0, int(body.get("timeout") or 0))
+        engine = str(body.get("engine") or "").strip().lower()
+        if engine not in ("", "llm", "indobert"):
+            self.reply(400, {"started": False,
+                             "message": "engine tidak dikenal: %s" % engine})
+            return
         paths = project_store.paths(slug)
 
         with _state["lock"]:
@@ -576,6 +611,8 @@ class Handler(SimpleHTTPRequestHandler):
                 cmd += ["--batch-size", str(batch)]
             if timeout:
                 cmd += ["--timeout", str(timeout)]
+            if engine in ("llm", "indobert"):
+                cmd += ["--engine", engine]
             _state["error"] = None
             _state["log"] = []
             _state["args"] = {**body, "project": slug}
@@ -767,6 +804,8 @@ def main() -> int:
     print("API lokal: /api/analyze, /api/status, /api/scrape/*, /api/login/* "
           "(kunci & sesi tetap lokal)", file=sys.stderr)
     print("Server lokal aktif. Tekan Ctrl+C untuk berhenti.", file=sys.stderr)
+    print("Catatan: bila kode llm_server.py diubah, RESTART server ini — "
+          "proses yang sudah berjalan memakai kode lama.", file=sys.stderr)
     try:
         server.serve_forever()
     except KeyboardInterrupt:

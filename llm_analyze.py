@@ -13,6 +13,7 @@ Contoh:
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import os
 import re
@@ -27,6 +28,93 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 SENTIMENTS = {"positif", "negatif", "netral"}
 EMOTIONS = {"marah", "senang", "sedih", "sarkas", "netral", "takut", "kagum"}
+DEFAULT_INDOBERT_MODEL = "Aardiiiiy/indobertweet-base-Indonesian-sentiment-analysis"
+ENGINE_ALIASES = {"llm": "llm", "indobert": "indobert",
+                  "indobertweet": "indobert", "bert": "indobert"}
+SENT_LABEL_MAP = {
+    "positive": "positif", "positif": "positif", "pos": "positif",
+    "negative": "negatif", "negatif": "negatif", "neg": "negatif",
+    "neutral": "netral", "netral": "netral", "neu": "netral",
+}
+
+
+def clean_for_bert(text: str) -> str:
+    """IndoBERTweet dilatih pada teks Twitter: @user, URL, dan hashtag adalah
+    token yang dikenal model, jadi JANGAN dibuang seperti norm() untuk key.
+    Hanya rapikan spasi dan potong panjang."""
+    s = str(text or "").replace("\u200b", " ")
+    s = re.sub(r"\s+", " ", s).strip()
+    return s[:1000]
+
+
+class IndoBertSentiment:
+    """Klasifikasi sentimen lokal (3 kelas) tanpa LLM API.
+
+    Model dimuat malas: torch/transformers hanya dibutuhkan bila engine ini
+    benar-benar dipakai, sehingga instalasi LLM biasa tetap ringan.
+    """
+
+    def __init__(self, model_name: str = DEFAULT_INDOBERT_MODEL, max_length: int = 256,
+                 device: str = "auto"):
+        self.model_name = model_name
+        self.max_length = max_length
+        self.device_pref = device
+        self.device = "cpu"
+        self._tok = None
+        self._model = None
+        self._torch = None
+        self._id2label: dict[int, str] = {}
+
+    def load(self) -> None:
+        if self._model is not None:
+            return
+        try:
+            import torch
+            from transformers import AutoModelForSequenceClassification, AutoTokenizer
+        except ImportError as exc:  # pragma: no cover - tergantung lingkungan
+            raise RuntimeError(
+                "Engine indobert butuh torch + transformers. Jalankan:\n"
+                "  .venv/bin/pip install torch transformers sentencepiece"
+            ) from exc
+        self._torch = torch
+        pref = str(self.device_pref or "auto").strip().lower()
+        if pref == "auto":
+            self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        elif pref.startswith("cuda") and not torch.cuda.is_available():
+            raise RuntimeError(
+                "--device %s diminta tetapi CUDA tidak tersedia. Instal build CUDA:\n"
+                "  .venv/bin/pip install --index-url https://download.pytorch.org/whl/cu130 torch"
+                % pref
+            )
+        else:
+            self.device = pref
+        self._tok = AutoTokenizer.from_pretrained(self.model_name)
+        self._model = AutoModelForSequenceClassification.from_pretrained(self.model_name)
+        self._model.to(self.device)
+        self._model.eval()
+        raw = getattr(self._model.config, "id2label", None) or {}
+        self._id2label = {int(k): str(v) for k, v in raw.items()}
+        print("indobert: device=%s" % self.device, file=sys.stderr)
+
+    def predict(self, texts: list[str], batch_size: int = 16) -> list[tuple[str, float]]:
+        """Kembalikan [(label_indo, confidence), ...] sejajar dengan texts."""
+        self.load()
+        torch = self._torch
+        out: list[tuple[str, float]] = []
+        for i in range(0, len(texts), batch_size):
+            chunk = [clean_for_bert(t) or " " for t in texts[i:i + batch_size]]
+            enc = self._tok(chunk, truncation=True, max_length=self.max_length,
+                            padding=True, return_tensors="pt")
+            enc = {k: v.to(self.device) for k, v in enc.items()}
+            with torch.no_grad():
+                logits = self._model(**enc).logits
+            probs = torch.softmax(logits, dim=-1).float().cpu()
+            for row in probs:
+                idx = int(row.argmax())
+                raw_label = str(self._id2label.get(idx, "")).strip().lower()
+                label = SENT_LABEL_MAP.get(raw_label, "netral")
+                out.append((label, float(row[idx])))
+        return out
 
 
 def load_env(path: Path | None = None) -> dict:
@@ -255,7 +343,8 @@ def normalize_labels(raw, size: int, topic_ids: set[int]) -> dict[int, dict]:
     return out
 
 
-def _build_result(cfg: dict, items: list[dict], topics: list[dict], labels: dict[str, dict]) -> dict:
+def _build_result(cfg: dict, items: list[dict], topics: list[dict], labels: dict[str, dict],
+                  model_label: str | None = None) -> dict:
     counts = {t["id"]: 0 for t in topics}
     for v in labels.values():
         tid = v.get("topic")
@@ -290,7 +379,7 @@ def _build_result(cfg: dict, items: list[dict], topics: list[dict], labels: dict
     return {
         "schema": 1,
         "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-        "model": cfg.get("LLM_MODEL") or "cmd",
+        "model": model_label or cfg.get("LLM_MODEL") or "cmd",
         "counts": {"comments": len(items), "labeled": len(labels), "topics": len(topics_out)},
         "topics": topics_out,
         "keywords": keywords,
@@ -298,8 +387,62 @@ def _build_result(cfg: dict, items: list[dict], topics: list[dict], labels: dict
     }
 
 
+def analyze_indobert(cfg: dict, items: list[dict], batch_size: int, on_progress=None,
+                     on_partial=None, model: str = "", device: str = "") -> dict:
+    """Label sentimen lokal dengan IndoBERTweet (tanpa LLM API).
+
+    Hanya field `sentiment` yang diisi model. Emosi, toksisitas, spam, dan topik
+    dibiarkan kosong karena model 3 kelas ini tidak memprediksinya; mengisinya
+    dengan nilai default akan menyesatkan pembaca.
+    """
+    model_name = model or cfg.get("INDOBERT_MODEL") or DEFAULT_INDOBERT_MODEL
+    clf = IndoBertSentiment(model_name, device=device or cfg.get("INDOBERT_DEVICE") or "auto")
+    chunks = [items[i:i + batch_size] for i in range(0, len(items), batch_size)] if items else []
+    total = len(chunks)
+    if on_progress:
+        try:
+            on_progress(0, total, 0)
+        except Exception:
+            pass
+
+    labels: dict[str, dict] = {}
+    for n, batch in enumerate(chunks, 1):
+        try:
+            preds = clf.predict([it.get("text", "") for it in batch])
+            for it, (label, conf) in zip(batch, preds):
+                labels[it["key"]] = {
+                    "sentiment": label,
+                    "emotion": "",
+                    "toxicity": None,
+                    "spam": False,
+                    "topic": None,
+                    "confidence": round(conf, 3),
+                    "alasan": "indobert (%.2f)" % conf,
+                }
+        except Exception as exc:
+            print("Peringatan: batch %d/%d gagal (%s); lanjut." % (n, total, exc), file=sys.stderr)
+        if on_progress:
+            try:
+                on_progress(n, total, len(labels))
+            except Exception:
+                pass
+        elif n % 5 == 0 or n == total:
+            print("  batch %d/%d" % (n, total), file=sys.stderr)
+        if on_partial:
+            try:
+                on_partial(_build_result(cfg, items, [], labels, model_label=model_name))
+            except Exception:
+                pass
+
+    return _build_result(cfg, items, [], labels, model_label=model_name)
+
+
 def analyze(cfg: dict, items: list[dict], batch_size: int, timeout: int,
-            with_topics: bool = True, on_progress=None, on_partial=None) -> dict:
+            with_topics: bool = True, on_progress=None, on_partial=None,
+            engine: str = "llm", model: str = "", device: str = "") -> dict:
+    if engine == "indobert":
+        return analyze_indobert(cfg, items, batch_size, on_progress=on_progress,
+                                on_partial=on_partial, model=model, device=device)
     topics: list[dict] = []
     chunks = [items[i:i + batch_size] for i in range(0, len(items), batch_size)] if items else []
     total = len(chunks)
@@ -359,6 +502,11 @@ def main(argv=None) -> int:
     ap.add_argument("--batch-size", type=int, default=0)
     ap.add_argument("--timeout", type=int, default=0)
     ap.add_argument("--no-topic", action="store_true")
+    ap.add_argument("--engine", default="", choices=["llm", "indobert"],
+                    help="llm (API, default) atau indobert (lokal, tanpa API)")
+    ap.add_argument("--model", default="", help="override nama model IndoBERT")
+    ap.add_argument("--device", default="",
+                    help="auto (default) | cuda | cuda:0 | cpu untuk engine indobert")
     ap.add_argument("--progress-file", default="",
                     help="tulis progres batch ke file JSON (dipakai server lokal)")
     ap.add_argument("--dry-run", action="store_true", help="tampilkan rencana tanpa panggil API")
@@ -384,13 +532,18 @@ def main(argv=None) -> int:
     cfg = {k: (os.environ.get(k) or v) for k, v in cfg.items()}
     batch = int(a.batch_size or cfg.get("LLM_BATCH_SIZE") or 40)
     timeout = int(a.timeout or cfg.get("LLM_TIMEOUT") or 90)
+    engine = ENGINE_ALIASES.get(str(a.engine or cfg.get("SENTIMENT_ENGINE") or "llm").strip().lower(), "llm")
     items = collect(load_posts(Path(a.inp)))
     if a.limit > 0:
         items = items[:a.limit]
 
     if a.dry_run:
-        print("model=%s base=%s" % (cfg.get("LLM_MODEL") or "cmd",
-                                   cfg.get("LLM_BASE_URL") or "(kosong)"))
+        if engine == "indobert":
+            print("engine=indobert model=%s" %
+                  (a.model or cfg.get("INDOBERT_MODEL") or DEFAULT_INDOBERT_MODEL))
+        else:
+            print("engine=llm model=%s base=%s" % (cfg.get("LLM_MODEL") or "cmd",
+                                                   cfg.get("LLM_BASE_URL") or "(kosong)"))
         print("komentar=%d batch=%d jumlah_panggilan≈%d" %
               (len(items), batch, 1 + (len(items) + batch - 1) // batch))
         print("kredensial: " + ("ada" if cfg.get("LLM_API_KEY") else "TIDAK ADA (isi .env)"))
@@ -399,7 +552,9 @@ def main(argv=None) -> int:
     if not items:
         print("Tidak ada komentar untuk dianalisis.", file=sys.stderr)
         return 1
-    print("Menganalisis %d komentar dengan %s …" % (len(items), cfg.get("LLM_MODEL") or "cmd"),
+    print("Menganalisis %d komentar dengan %s …" %
+          (len(items), (a.model or cfg.get("INDOBERT_MODEL") or DEFAULT_INDOBERT_MODEL)
+           if engine == "indobert" else (cfg.get("LLM_MODEL") or "cmd")),
           file=sys.stderr)
 
     out = Path(a.out)
@@ -425,7 +580,8 @@ def main(argv=None) -> int:
             print("  batch %d/%d (berlabel: %d)" % (n, total, labeled), file=sys.stderr)
 
     result = analyze(cfg, items, batch, timeout, with_topics=not a.no_topic,
-                     on_progress=progress, on_partial=save_partial)
+                     on_progress=progress, on_partial=save_partial,
+                     engine=engine, model=a.model, device=a.device)
     save_partial(result)
     print("Selesai: %s (%d label, %d topik)" %
           (out.name, result["counts"]["labeled"], result["counts"]["topics"]), file=sys.stderr)

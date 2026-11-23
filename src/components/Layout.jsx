@@ -120,6 +120,13 @@ export default function Layout({ tab, tabLabel, project, onTab, onProjectChange,
   const [projects, setProjects] = useState([]);
   const [analyzing, setAnalyzing] = useState(false);
   const [anMsg, setAnMsg] = useState('');
+  const [engine, setEngine] = useState(() => {
+    try { return localStorage.getItem('sna-engine') || 'llm'; } catch { return 'llm'; }
+  });
+
+  useEffect(() => {
+    try { localStorage.setItem('sna-engine', engine); } catch { /* ignore */ }
+  }, [engine]);
 
   useEffect(() => {
     document.documentElement.classList.toggle('dark', dark);
@@ -162,7 +169,7 @@ export default function Layout({ tab, tabLabel, project, onTab, onProjectChange,
     const r = await api('/api/analyze', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ project: project || 'default' }),
+      body: JSON.stringify({ project: project || 'default', engine }),
     });
     if (r.ok || r.status === 409) { setAnalyzing(true); setAnMsg('Memulai analisis…'); }
     else if (r.status === 404 || r.status === 501) setAnMsg('Server analisis tidak aktif');
@@ -207,12 +214,24 @@ export default function Layout({ tab, tabLabel, project, onTab, onProjectChange,
 
             <div className="ml-auto flex shrink-0 items-center gap-2">
               {anMsg && <span className="hidden max-w-[180px] truncate text-[11px] text-blue-600 sm:inline dark:text-blue-300">{anMsg}</span>}
+              <select
+                value={engine}
+                onChange={(e) => setEngine(e.target.value)}
+                disabled={analyzing}
+                className="input-field h-8 py-0 text-xs"
+                title="Mesin pelabelan sentimen: LLM API atau IndoBERT lokal"
+              >
+                <option value="llm">LLM</option>
+                <option value="indobert">IndoBERT</option>
+              </select>
               <button
                 type="button"
                 onClick={runAnalyze}
                 disabled={analyzing}
                 className="btn-primary h-8 px-3"
-                title="Jalankan analisis AI untuk proyek ini"
+                title={engine === 'indobert'
+                  ? 'Jalankan pelabelan sentimen lokal (IndoBERT, tanpa API)'
+                  : 'Jalankan analisis AI untuk proyek ini'}
               >
                 <I.spark className="h-3.5 w-3.5" />
                 <span className="hidden sm:inline">{analyzing ? 'Menganalisis…' : 'Analisis AI'}</span>

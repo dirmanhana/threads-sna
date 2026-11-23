@@ -97,6 +97,13 @@ export default function SentimentPage({ embedded = false, project: projectProp, 
   const [flagFilter, setFlagFilter] = useState('');
   const [sortBy, setSortBy] = useState('baru');
   const [shown, setShown] = useState(60);
+  const [engine, setEngine] = useState(() => {
+    try { return localStorage.getItem('sna-engine') || 'llm'; } catch { return 'llm'; }
+  });
+
+  useEffect(() => {
+    try { localStorage.setItem('sna-engine', engine); } catch { /* ignore */ }
+  }, [engine]);
 
   const [sandboxText, setSandboxText] = useState('');
   const [sandboxBusy, setSandboxBusy] = useState(false);
@@ -137,7 +144,7 @@ export default function SentimentPage({ embedded = false, project: projectProp, 
     const r = await api('/api/analyze', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ project: project || 'default' }),
+      body: JSON.stringify({ project: project || 'default', engine }),
     });
     if (r.ok || r.status === 409) setAnalyzing(true);
   };
@@ -306,16 +313,33 @@ export default function SentimentPage({ embedded = false, project: projectProp, 
             <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
               Tempel komentar atau keluhan pelanggan untuk menguji deteksi sentimen, emosi, toksisitas, dan spam secara instan
             </p>
+            {engine === 'indobert' && (
+              <p className="mt-1 text-[11px] text-amber-600 dark:text-amber-400">
+                Mode IndoBERT hanya mengisi label sentimen (3 kelas). Emosi, toksisitas, spam, dan topik akan kosong.
+              </p>
+            )}
           </div>
-          <button
-            type="button"
-            onClick={runBatchAnalyze}
-            disabled={analyzing}
-            className="btn-primary"
-          >
-            <Sparkles className="h-3.5 w-3.5" />
-            {analyzing ? 'Memproses Batch...' : 'Analisis Komentar Belum Berlabel'}
-          </button>
+          <div className="flex flex-wrap items-center gap-2">
+            <select
+              value={engine}
+              onChange={(e) => setEngine(e.target.value)}
+              disabled={analyzing}
+              className="input-field h-8 py-0 text-xs"
+              title="Mesin pelabelan sentimen"
+            >
+              <option value="llm">LLM API</option>
+              <option value="indobert">IndoBERT (lokal)</option>
+            </select>
+            <button
+              type="button"
+              onClick={runBatchAnalyze}
+              disabled={analyzing}
+              className="btn-primary"
+            >
+              <Sparkles className="h-3.5 w-3.5" />
+              {analyzing ? 'Memproses Batch...' : 'Analisis Komentar Belum Berlabel'}
+            </button>
+          </div>
         </div>
 
         <form onSubmit={runSandbox} className="flex flex-col gap-2.5 sm:flex-row">
