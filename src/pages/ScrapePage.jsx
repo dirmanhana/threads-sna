@@ -274,16 +274,19 @@ export default function ScrapePage({ embedded = false, project: projectProp, onT
                   )}
                 </div>
               </div>
-              <form onSubmit={createThreadProfile} className="mt-3 flex flex-wrap items-center gap-2">
+              <div className="mt-3 flex flex-wrap items-center gap-2">
                 <input
                   type="text"
                   value={newProfileName}
                   onChange={(e) => setNewProfileName(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') { e.preventDefault(); createThreadProfile(e); }
+                  }}
                   placeholder="Nama profil baru, mis. Akun Scraping"
                   className="input-field min-w-[220px] flex-1"
                 />
-                <button type="submit" disabled={busy || !newProfileName.trim()} className="btn-secondary">Tambah Profil</button>
-              </form>
+                <button type="button" onClick={createThreadProfile} disabled={busy || !newProfileName.trim()} className="btn-secondary">Tambah Profil</button>
+              </div>
               <div className="mt-2 flex flex-wrap gap-2">
                 {(login.profiles || []).map((p) => (
                   <div key={p.id} className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] dark:border-slate-700 dark:bg-slate-900">
